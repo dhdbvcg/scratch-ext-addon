@@ -1,7 +1,7 @@
 # scratch-ext-addons
 
 ExtensionBuilder（Scratch / TurboWarp 扩展编辑器）的独立插件集合。
-每个插件可经 `github:dhdbvcg/scratch-ext-addons` 一键安装，也可单独导入对应目录的 `index.js`。
+每个插件可经 `github:dhdbvcg/scratch-ext-addon` 一键安装，也可单独导入对应目录的 `index.js`。
 
 ## 插件列表
 
@@ -19,7 +19,7 @@ ExtensionBuilder（Scratch / TurboWarp 扩展编辑器）的独立插件集合�
 在编辑器「设置 → 插件管理 → 安装插件」输入来源：
 
 ```
-github:dhdbvcg/scratch-ext-addons
+github:dhdbvcg/scratch-ext-addon
 ```
 
 各插件会作为单个插件安装（仓库内所有 `* /index.js` 都会被识别）。也可只导入某个目录的 `index.js` 单独安装。
