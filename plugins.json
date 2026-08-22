@@ -1,10 +1,40 @@
 {
   "plugins": [
-    "block-duplicate",
-    "zebra-striping",
-    "editor-square-inputs",
-    "editor-number-arrow-keys",
-    "transparent-orphans",
-    "developer-tools"
+    {
+      "dir": "block-duplicate",
+      "name": "快速复制积木",
+      "description": "按住 Alt/⌥ 拖动积木直接复制一份（无需右键）。按住 Ctrl/⌘ 拖动只复制选中的单个积木（cherry pick）。扩展拼装积木时非常好用。",
+      "category": "编辑器"
+    },
+    {
+      "dir": "zebra-striping",
+      "name": "斑马条纹积木",
+      "description": "嵌套的相同颜色积木（如 重复 里的 重复）交替明暗显示，方便看清嵌套层级。",
+      "category": "视觉"
+    },
+    {
+      "dir": "editor-square-inputs",
+      "name": "方形数字输入框",
+      "description": "数字/文本输入框从圆形变为方形，视觉上更清晰地区分输入区域。",
+      "category": "视觉"
+    },
+    {
+      "dir": "editor-number-arrow-keys",
+      "name": "数字框 ↑↓ 微调",
+      "description": "聚焦数字输入框时，按 ↑/↓ 键可以快速增减数值，Shift 一次 ±10，替代手动输入。",
+      "category": "编辑器"
+    },
+    {
+      "dir": "transparent-orphans",
+      "name": "孤立积木半透明",
+      "description": "顶部不是帽子积木的孤立积木（没有以帽子启动的脚本）变淡显示，帮助快速发现未接线的积木；帽子积木本身保持清晰。",
+      "category": "视觉"
+    },
+    {
+      "dir": "developer-tools",
+      "name": "更多右键菜单栏",
+      "description": "右键积木新增「全部复制（整条脚本）/ 复制积木（单块）/ 剪切积木」，复制内容存入内部剪贴板；点击空白画布会浮现「粘贴」按钮，点击即可粘贴。区别于原版「复制」直接落一块到画布。",
+      "category": "编辑器"
+    }
   ]
 }
