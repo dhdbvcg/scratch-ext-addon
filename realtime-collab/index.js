@@ -724,8 +724,12 @@ export default {
 
         // 添加工具栏触发按钮
         const triggerBtn = addToolbarButton('🤝 实时协作', () => {
+            console.log('[RTC] button clicked! panel display:', panel.style.display);
+            alert('[RTC debug] 按钮点击触发！当前面板状态: ' + panel.style.display);
             panel.style.display = panel.style.display === 'none' ? '' : 'none';
+            console.log('[RTC] after toggle, display:', panel.style.display);
             render();
+            console.log('[RTC] render() called');
         });
 
         // 检查 URL 是否带房间ID
