@@ -1,0 +1,10 @@
+{
+  "plugins": [
+    "block-duplicate",
+    "zebra-striping",
+    "editor-square-inputs",
+    "editor-number-arrow-keys",
+    "transparent-orphans",
+    "developer-tools"
+  ]
+}
