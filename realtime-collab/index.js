@@ -15,7 +15,7 @@ export default {
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 20px 60px rgba(0,0,0,.25);
-  z-index: 200;
+  z-index: 99999;
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -724,12 +724,23 @@ export default {
 
         // 添加工具栏触发按钮
         const triggerBtn = addToolbarButton('🤝 实时协作', () => {
-            console.log('[RTC] button clicked! panel display:', panel.style.display);
-            alert('[RTC debug] 按钮点击触发！当前面板状态: ' + panel.style.display);
-            panel.style.display = panel.style.display === 'none' ? '' : 'none';
-            console.log('[RTC] after toggle, display:', panel.style.display);
-            render();
-            console.log('[RTC] render() called');
+            console.log('[RTC] === 按钮点击开始 ===');
+            console.log('[RTC] panel element:', panel);
+            console.log('[RTC] panel.parentNode:', panel && panel.parentNode);
+            console.log('[RTC] panel display before:', panel ? panel.style.display : 'NO PANEL');
+            try {
+                panel.style.display = panel.style.display === 'none' ? '' : 'none';
+                console.log('[RTC] panel display after:', panel.style.display);
+                console.log('[RTC] panel offsetWidth:', panel.offsetWidth, 'offsetHeight:', panel.offsetHeight);
+                console.log('[RTC] panel.getBoundingClientRect():', panel.getBoundingClientRect());
+                render();
+                console.log('[RTC] render() 完成, panel innerHTML length:', panel.innerHTML.length);
+                console.log('[RTC] panel childCount:', panel.children.length);
+            } catch(e) {
+                console.error('[RTC] 错误:', e);
+                alert('[RTC ERROR] ' + e.message + '\n\n' + e.stack.slice(0, 500));
+            }
+            console.log('[RTC] === 按钮点击结束 ===');
         });
 
         // 检查 URL 是否带房间ID
