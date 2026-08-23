@@ -418,6 +418,9 @@ export default {
         let suppressBroadcast = false;
         let approvedMembers = {};   // peerId -> true（私人房间已审批）
         let pendingJoiners = {};    // peerId -> { conn }（等待审批的加入者）
+        let initError = '';          // 初始化错误信息（空=无错误）
+        let lastAction = '';          // 上次操作: 'create' | 'join' | ''
+        let lastActionId = '';        // 上次操作的参数（房间ID）
 
         // ─── 连接设置 ───
         const SETTINGS_KEY = STORAGE_PREFIX + 'server_config';
@@ -765,6 +768,33 @@ export default {
                 loading.innerHTML = '<div class="rtc-spinner"></div><span>正在连接信令服务器…</span>';
                 body.appendChild(loading);
             }
+
+            // 初始化错误提示（内联，不弹 alert 阻塞）
+            if (initError && !connecting) {
+                const errBox = createElement('div', { className: 'rtc-banner err' });
+                errBox.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' +
+                    '<span>' + escapeHtml(initError).replace(/\n/g, '<br>') + '</span>';
+                body.appendChild(errBox);
+
+                const retryBtn = createElement('button', { className: 'rtc-btn rtc-btn-primary', textContent: '🔄 重试连接' });
+                retryBtn.style.marginTop = '8px';
+                retryBtn.onclick = () => {
+                    initError = '';
+                    connecting = true;
+                    render();
+                    // 重新触发上一次的操作（创建或加入）
+                    // 通过记录 lastAction 来决定重做什么
+                    if (lastAction === 'create') {
+                        createRoom(lastActionId || null);
+                    } else if (lastAction === 'join' && lastActionId) {
+                        joinRoom(lastActionId);
+                    } else {
+                        // 没有记录的操作，仅初始化 peer
+                        initPeer().then(() => { connecting = false; render(); });
+                    }
+                };
+                body.appendChild(retryBtn);
+            }
         }
 
         function renderConnected(body) {
@@ -939,10 +969,22 @@ export default {
         async function initPeer() {
             if (peer) return peer;
             try {
-                // 动态加载 PeerJS（CDN）
+                // 动态加载 PeerJS（多 CDN 回退，国内网络兼容）
                 if (typeof window.Peer === 'undefined') {
                     console.log('[RTC] 正在加载 PeerJS 库...');
-                    await loadScript('https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js');
+                    const PEERJS_CDNS = [
+                        'https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js',
+                        'https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js',
+                        'https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js'
+                    ];
+                    let loaded = false;
+                    for (const cdn of PEERJS_CDNS) {
+                        try {
+                            await loadScript(cdn);
+                            if (typeof window.Peer !== 'undefined') { loaded = true; break; }
+                        } catch(e) { console.warn('[RTC] CDN 加载失败:', cdn, e.message); }
+                    }
+                    if (!loaded) throw new Error('PeerJS 库加载失败（所有 CDN 均不可达）。请检查网络连接。');
                     console.log('[RTC] PeerJS 库加载完成');
                 }
 
@@ -994,6 +1036,7 @@ export default {
 
                         // 连接成功，设置事件监听
                         setupPeerEvents();
+                        initError = '';  // 清除之前的错误
                         return peer;
 
                     } catch (e) {
@@ -1011,8 +1054,9 @@ export default {
 
             } catch (e) {
                 console.error('[RTC] 初始化失败:', e);
-                alert('实时协作初始化失败:\n' + (e && e.message ? e.message : String(e)) +
-                    '\n\n可能原因:\n1. 网络无法访问 PeerJS 信令服务器\n2. 防火墙阻止了 WebSocket 连接\n3. 公司/学校网络限制了 P2P 连接');
+                initError = (e && e.message ? e.message : String(e)) +
+                    '\n\n可能原因:\n1. 网络无法访问 PeerJS 信令服务器或 CDN\n2. 防火墙阻止了 WebSocket 连接\n3. 公司/学校网络限制了 P2P 连接';
+                render();
                 return null;
             }
         }
@@ -1059,6 +1103,7 @@ export default {
         }
 
         async function createRoom(roomIdToUse) {
+            lastAction = 'create'; lastActionId = roomIdToUse || '';
             const p = await initPeer();
             if (!p) return;
             await new Promise((resolve) => { p.open ? resolve() : p.on('open', resolve); });
@@ -1084,6 +1129,7 @@ export default {
         }
 
         async function joinRoom(id) {
+            lastAction = 'join'; lastActionId = id;
             const p = await initPeer();
             if (!p) return;
             await new Promise((resolve) => { p.open ? resolve() : p.on('open', resolve); });
