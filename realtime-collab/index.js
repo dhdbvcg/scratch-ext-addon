@@ -1012,7 +1012,7 @@ export default {
 
             // 聊天
             body.appendChild(createElement('hr', { className: 'rtc-divider' }));
-            body.appendChild(createElement('div', { className: '  chat-title', textContent: '聊天' }));
+            body.appendChild(createElement('div', { className: 'rtc-chat-title', textContent: '聊天' }));
 
             const chatBox = createElement('div', { className: 'rtc-chat-box' });
             chatMessages.forEach(m => {
@@ -1037,6 +1037,7 @@ export default {
                 addChatMessage(username, text);
                 broadcast({ type: 'chat', name: username, text: text });
                 chatInput.value = '';
+                render(); // 刷新聊天显示
             };
             chatSendBtn.onclick = doSend;
             chatInput.onkeydown = (e) => { if (e.key === 'Enter') doSend(); };
