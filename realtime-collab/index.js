@@ -484,6 +484,7 @@ export default {
         let editingBannerName = '';   // 远程编辑提示中的用户名
         let editingBannerTimer = null;
         let chatMessages = [];
+        let chatBoxEl = null;       // 当前聊天框 DOM 引用（增量追加用，避免整面板重建丢失）
         let pendingXml = null;      // 收到但暂缓应用的 XML（避免循环广播）
         let suppressBroadcast = false;
         let approvedMembers = {};   // peerId -> true（私人房间已审批）
@@ -1021,6 +1022,7 @@ export default {
                 chatBox.appendChild(msgEl);
             });
             body.appendChild(chatBox);
+            chatBoxEl = chatBox;   // 保存引用，供增量追加使用
             // 自动滚动到底部
             chatBox.scrollTop = chatBox.scrollHeight;
 
@@ -1670,10 +1672,21 @@ export default {
         }
 
         // ─── 聊天 ───
+        // 增量追加单条消息节点到当前聊天框（不重建整面板，保证发送/接收即时可见）
+        function appendChatNode(name, text) {
+            if (!chatBoxEl || !chatBoxEl.parentNode) return; // 面板未渲染，交由 render() 全量重建兜底
+            const msgEl = createElement('div', { className: 'rtc-chat-msg' });
+            msgEl.innerHTML = '<span class="rtc-chat-msg-name">' + escapeHtml(name) + '</span>: ' + escapeHtml(text);
+            chatBoxEl.appendChild(msgEl);
+            // 自动滚动到底部
+            chatBoxEl.scrollTop = chatBoxEl.scrollHeight;
+        }
         function addChatMessage(name, text) {
             chatMessages.push({ name, text, time: Date.now() });
             if (chatMessages.length > 200) chatMessages.shift(); // 限制历史
             saveChatHistory();
+            // 增量显示（若面板已渲染）；render() 仍作为全量兜底
+            appendChatNode(name, text);
         }
         function saveChatHistory() {
             if (!roomId) return;
