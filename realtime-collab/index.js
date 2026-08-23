@@ -76,6 +76,35 @@ export default {
 :global(.rtc-rz-nw) { top: -4px; left: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
 :global(.rtc-rz-se) { bottom: -4px; right: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
 :global(.rtc-rz-sw) { bottom: -4px; left: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+
+/* 远程光标 */
+:global(.rtc-cursor-layer) {
+  position: fixed;
+  top: 0; left: 0;
+  pointer-events: none;
+  z-index: 99997;
+  overflow: hidden;
+}
+:global(.rtc-remote-cursor) {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: left .15s, top .15s;
+  pointer-events: none;
+}
+:global(.rtc-remote-cursor-pointer) {
+  width: 16px; height: 16px;
+  border-left: 3px solid #ff7043;
+  border-top: 3px solid #ff7043;
+  transform: rotate(-45deg);
+  margin-top: -2px;
+}
+:global(.rtc-remote-cursor-name) {
+  font-size: 11px; padding: 1px 6px; border-radius: 4px;
+  background: #ff7043; color: #fff; white-space: nowrap;
+  margin-top: 2px; font-weight: 500;
+}
 :global(.rtc-alpha-banner) {
   background: #fef7e0;
   border: 1px solid #fdd663;
@@ -632,7 +661,9 @@ export default {
         function loadScript(src) {
             return new Promise((resolve, reject) => {
                 const s = document.createElement('script');
-                s.src = s.onload = resolve; s.onerror = reject;
+                s.src = src;
+                s.onload = resolve;
+                s.onerror = reject;
                 document.head.appendChild(s);
             });
         }
@@ -651,6 +682,7 @@ export default {
             // 把当前工作区 XML 记录为初始状态
             try { pendingXml = getWorkspaceXml(); } catch(e) {}
 
+            startCursorMonitor();
             render();
             console.log('[RTC] Room created:', roomId);
             alert('房间已创建！房间ID: ' + roomId + '\n请通过「复制房间URL」分享给他人。');
@@ -669,6 +701,7 @@ export default {
             const conn = p.connect(id, { reliable: true });
             handleConnection(conn);
 
+            startCursorMonitor();
             render();
         }
 
@@ -711,6 +744,7 @@ export default {
 
             conn.on('close', () => {
                 console.log('[RTC] Connection closed:', conn.peer);
+                removeRemoteCursor(conn.peer);
                 delete connections[conn.peer];
                 render();
             });
@@ -758,6 +792,13 @@ export default {
                     privacy = msg.value || 'public';
                     render();
                     break;
+
+                case 'cursor':
+                    if (msg.x != null && msg.y != null) {
+                        const senderName = (connections[fromPeerId] && connections[fromPeerId].metadata && connections[fromPeerId].metadata.username) || '?';
+                        updateRemoteCursor(fromPeerId, senderName, msg.x, msg.y);
+                    }
+                    break; // 不触发 render（光标更新太频繁）
 
                 default:
                     break;
@@ -830,14 +871,72 @@ export default {
             if (chatMessages.length > 200) chatMessages.shift(); // 限制历史
         }
 
+        // ─── 远程光标 ───
+        const cursorLayer = createElement('div', { className: 'rtc-cursor-layer' });
+        const remoteCursors = {}; // { peerId: { el, name, x, y } }
+        let lastCursorBroadcast = 0;
+        document.body.appendChild(cursorLayer);
+
+        function broadcastCursor(x, y) {
+            const now = Date.now();
+            if (now - lastCursorBroadcast < 50) return; // 节流 20fps
+            lastCursorBroadcast = now;
+            broadcast({ type: 'cursor', x: Math.round(x), y: Math.round(y) });
+        }
+
+        function updateRemoteCursor(peerId, name, x, y) {
+            let rc = remoteCursors[peerId];
+            if (!rc) {
+                rc = {};
+                rc.el = createElement('div', { className: 'rtc-remote-cursor' });
+                rc.el.innerHTML = '<div class="rtc-remote-cursor-pointer"></div>' +
+                    '<div class="rtc-remote-cursor-name">' + escapeHtml(name || '?') + '</div>';
+                cursorLayer.appendChild(rc.el);
+                remoteCursors[peerId] = rc;
+            }
+            rc.el.style.left = x + 'px';
+            rc.el.style.top = y + 'px';
+            rc.name = name;
+            if (name) {
+                const nameEl = rc.el.querySelector('.rtc-remote-cursor-name');
+                if (nameEl) nameEl.textContent = name;
+            }
+        }
+
+        function removeRemoteCursor(peerId) {
+            const rc = remoteCursors[peerId];
+            if (rc && rc.el && rc.el.parentNode) rc.el.parentNode.removeChild(rc.el);
+            delete remoteCursors[peerId];
+        }
+
+        function clearAllRemoteCursors() {
+            Object.keys(remoteCursors).forEach(removeRemoteCursor);
+        }
+
+        // 监听鼠标移动广播光标位置
+        let cursorMonitorActive = false;
+        function startCursorMonitor() {
+            if (cursorMonitorActive) return;
+            cursorMonitorActive = true;
+            document.addEventListener('mousemove', onCursorMove);
+        }
+        function stopCursorMonitor() {
+            cursorMonitorActive = false;
+            document.removeEventListener('mousemove', onCursorMove);
+        }
+        function onCursorMove(e) {
+            if (!roomId || !peer) return;
+            broadcastCursor(e.clientX, e.clientY);
+        }
+
         // ─── 工具函数 ───
         function generateRoomId() {
-            const adjectives = ['cool','fast','smart','happy','brave','calm','wild','bright','dark','neon'];
-            const nouns = ['cat','bird','dog','fox','wolf','bear','lion','tiger','eagle','shark'];
+            const adjectives = ['快乐','聪明','勇敢','冷静','活泼','明亮','神秘','温暖','酷炫','闪电'];
+            const nouns = ['熊猫','老虎','凤凰','麒麟','龙','鹰','鲸鱼','狮子','星空','海洋'];
             const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
             const noun = nouns[Math.floor(Math.random() * nouns.length)];
             const num = Math.floor(Math.random() * 900) + 100;
-            return adj + '-' + noun + '-' + num;
+            return adj + noun + num;
         }
 
         function escapeHtml(str) {
@@ -853,6 +952,8 @@ export default {
 
         function leaveRoom() {
             stopWorkspaceSync();
+            stopCursorMonitor();
+            clearAllRemoteCursors();
             Object.values(connections).forEach(c => {
                 try { c.conn.close(); } catch(e) {}
             });
@@ -921,6 +1022,9 @@ export default {
         // 清理函数
         return function cleanup() {
             leaveRoom();
+            stopCursorMonitor();
+            clearAllRemoteCursors();
+            if (cursorLayer && cursorLayer.parentNode) cursorLayer.parentNode.removeChild(cursorLayer);
             document.removeEventListener('mousemove', onDrag);
             document.removeEventListener('mousemove', onResize);
             document.removeEventListener('mouseup', endDrag);
