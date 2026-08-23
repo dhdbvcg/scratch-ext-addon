@@ -420,6 +420,15 @@ export default {
     transition: background .15s;
 }
 :global(.rtc-toast-close:hover) { background: #f1f3f4; }
+
+/* 「工具」下拉菜单注入项 */
+:global(.rtc-tools-menu-item) {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; cursor: pointer;
+    font-size: 13px; color: #333; font-family: inherit;
+    border-radius: 4px; transition: background .12s;
+}
+:global(.rtc-tools-menu-item:hover) { background: rgba(0,0,0,.06); }
 `,
     setup: async function (ctx) {
         const { document, window, createElement, addToolbarButton, mountPanel, effect } = ctx;
@@ -1864,12 +1873,63 @@ export default {
         document.addEventListener('mouseup', endResize);
         window.addEventListener('resize', syncResizeLayer);
 
-        // 添加工具栏触发按钮
-        const triggerBtn = addToolbarButton('🤝 实时协作', () => {
+        // ─── 注入到「工具」下拉菜单（降级为工具栏按钮）───
+        const togglePanel = () => {
             panel.style.display = panel.style.display === 'none' ? '' : 'none';
             render();
             syncResizeLayer();
-        });
+        };
+
+        let triggerBtn = null;
+        const toolsBtn = Array.from(document.querySelectorAll('button, [role=button], .ext-menu-btn, [class*="menu"]'))
+            .find(el => el.textContent.trim() === '工具' || el.title === '工具' || el.getAttribute('aria-label') === '工具');
+
+        if (toolsBtn) {
+            // 找到「工具」按钮 → 注入菜单项到其下拉面板
+            // 等待下拉面板出现（首次点击时创建或已存在）
+            const tryInject = () => {
+                // 常见下拉面板选择器（按优先级）
+                const dropdown = toolsBtn.parentElement.querySelector('[class*="dropdown"], [class*="popover"], [class*="menu-list"], [role="menu"], [class*="popup"]')
+                    || toolsBtn.nextElementSibling
+                    || toolsBtn.closest('[class*="menu"]')?.querySelector('[class*="list"], [class*="items"], [role="listbox"]');
+                if (!dropdown) return false;
+
+                // 避免重复注入
+                if (dropdown.querySelector('.rtc-tools-menu-item')) return true;
+
+                const item = createElement('div', { className: 'rtc-tools-menu-item' }, ['🤝 实时协作']);
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    togglePanel();
+                    // 关闭下拉（模拟点击外部）
+                    document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                });
+                dropdown.appendChild(item);
+                return true;
+            };
+
+            // 立即尝试（下拉可能已渲染）
+            if (!tryInject()) {
+                // 监听点击「工具」按钮后注入（下拉动态创建）
+                const onClickCapture = () => {
+                    requestAnimationFrame(() => { tryInject(); });
+                    // 注入成功后移除监听
+                    setTimeout(() => {
+                        if (document.querySelector('.rtc-tools-menu-item')) {
+                            toolsBtn.removeEventListener('click', onClickCapture);
+                        }
+                    }, 500);
+                };
+                toolsBtn.addEventListener('click', onClickCapture);
+            }
+
+            // 同时保留一个隐藏的工具栏按钮作为备用入口（CSS 隐藏，仅作 registerDisposer 占位）
+            triggerBtn = addToolbarButton('🤝 实时协作', togglePanel);
+            triggerBtn.style.display = 'none';
+        } else {
+            // 降级：无「工具」菜单，使用独立工具栏按钮
+            triggerBtn = addToolbarButton('🤝 实时协作', togglePanel);
+        }
 
         // 检查 URL 是否带房间ID
         checkUrlForRoom();
