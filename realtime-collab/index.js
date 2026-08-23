@@ -356,8 +356,8 @@ export default {
 
         // ─── 配置 ───
         // PeerJS 信令服务器（按优先级尝试）
+        // 注意：peerjs.com 主域名已停用 ID 服务（返回 404），必须用带数字的节点 0/1.peerjs.com
         const PEERJS_SERVERS = [
-            { host: 'peerjs.com', port: 443, path: '/' },
             { host: '0.peerjs.com', port: 443, path: '/' },
             { host: '1.peerjs.com', port: 443, path: '/' }
         ];
@@ -949,7 +949,7 @@ export default {
                 // 构建服务器列表：用户配置优先，然后是内置备选（去重，避免重复尝试同一主机）
                 const cfg = serverConfig;
                 const servers = [];
-                const userSrv = { host: cfg.host || 'peerjs.com', port: cfg.port || 443, path: cfg.path || '/', key: cfg.key || undefined, secure: cfg.secure !== false };
+                const userSrv = { host: cfg.host || '0.peerjs.com', port: cfg.port || 443, path: cfg.path || '/', key: cfg.key || undefined, secure: cfg.secure !== false };
                 servers.push(userSrv);
                 PEERJS_SERVERS.forEach(s => {
                     if (s.host !== userSrv.host) servers.push(s);
@@ -964,12 +964,12 @@ export default {
                             host: srv.host,
                             port: srv.port,
                             path: srv.path,
+                            secure: srv.secure !== false,  // 显式声明，避免 PeerJS 协议推断错误（http/https 混用导致 ID 接口 CORS 失败）
                             config: { iceServers: ICE_SERVERS }
                         };
                         if (srv.key) peerOpts.key = srv.key;
-                        if (srv.secure === false) peerOpts.secure = false;
 
-                        console.log('[RTC] 尝试连接信令服务器:', srv.host + ':' + srv.port + ' (secure=' + (srv.secure !== false) + ')');
+                        console.log('[RTC] 尝试连接信令服务器:', srv.host + ':' + srv.port + ' (secure=' + peerOpts.secure + ')');
                         peer = new window.Peer(peerOpts);
 
                         // 用 Promise 包装连接，设置超时
@@ -988,7 +988,7 @@ export default {
                                 });
                             }),
                             new Promise((_, reject) =>
-                                setTimeout(() => reject(new Error('信令服务器连接超时（15秒）')), 15000)
+                                setTimeout(() => reject(new Error('信令服务器连接超时（8秒）')), 8000)
                             )
                         ]);
 
