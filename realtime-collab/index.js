@@ -257,10 +257,31 @@ export default {
         const { document, window, createElement, addToolbarButton, mountPanel, effect } = ctx;
 
         // ─── 配置 ───
-        const PEERJS_SERVER = 'peerjs.com'; // 或 '0.peerjs.com'
-        const PEERJS_PORT = 443;
-        const PEERJS_PATH = '/';
+        // PeerJS 信令服务器（按优先级尝试）
+        const PEERJS_SERVERS = [
+            { host: 'peerjs.com', port: 443, path: '/' },
+            { host: '0.peerjs.com', port: 443, path: '/' },
+            { host: '1.peerjs.com', port: 443, path: '/' }
+        ];
         const STORAGE_PREFIX = 'rtc_collab_';
+
+        // ICE 服务器配置（STUN + 免费公共 TURN，提高 NAT 穿透成功率）
+        const ICE_SERVERS = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            // 免费公共 TURN（来自 openrelayproject.org / metered.ca）
+            {
+                urls: 'turn:openrelay.metered.ca:80',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            },
+            {
+                urls: 'turn:openrelay.metered.ca:443',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            }
+        ];
 
         // ─── 状态 ───
         // 优先使用 ExtensionBuilder 登录系统的用户名
@@ -285,7 +306,7 @@ export default {
         let isHost = false;
         let roomId = '';
         let roomAlias = '';        // 房主自定义的房间昵称（仅展示，不参与连接）
-        let privacy = 'public';     // '  public' | 'private'
+        let privacy = 'public';     // 'public' | 'private'
         let myPeerId = '';
         let chatMessages = [];
         let pendingXml = null;      // 收到但暂缓应用的 XML（避免循环广播）
@@ -622,47 +643,93 @@ export default {
         }
 
         // ─── PeerJS / WebRTC 核心 ───
+        let currentServerIndex = 0;  // 当前使用的信令服务器索引
 
         async function initPeer() {
             if (peer) return peer;
             try {
                 // 动态加载 PeerJS（CDN）
                 if (typeof window.Peer === 'undefined') {
+                    console.log('[RTC] 正在加载 PeerJS 库...');
                     await loadScript('https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js');
+                    console.log('[RTC] PeerJS 库加载完成');
                 }
-                peer = new window.Peer({
-                    debug: 0,
-                    config: {
-                        iceServers: [
-                            { urls: 'stun:stun.l.google.com:19302' },
-                            { urls: 'stun:stun1.l.google.com:19302' }
-                        ]
+
+                // 按优先级尝试各个信令服务器
+                for (let i = 0; i < PEERJS_SERVERS.length; i++) {
+                    const srv = PEERJS_SERVERS[i];
+                    try {
+                        console.log('[RTC] 尝试连接信令服务器:', srv.host + ':' + srv.port);
+                        peer = new window.Peer({
+                            debug: 1,  // 开启调试日志
+                            host: srv.host,
+                            port: srv.port,
+                            path: srv.path,
+                            config: { iceServers: ICE_SERVERS }
+                        });
+
+                        // 用 Promise 包装连接，设置超时
+                        const connected = await Promise.race([
+                            new Promise((resolve, reject) => {
+                                peer.on('open', (id) => {
+                                    myPeerId = id;
+                                    currentServerIndex = i;
+                                    console.log('[RTC] ✓ Peer 连接成功! Peer ID:', id, '服务器:', srv.host);
+                                    resolve(id);
+                                });
+                                peer.on('error', (err) => {
+                                    console.error('[RTC] ✗ Peer 错误:', err.type, err);
+                                    reject(err);
+                                });
+                            }),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('信令服务器连接超时（15秒）')), 15000)
+                            )
+                        ]);
+
+                        // 连接成功，设置事件监听
+                        setupPeerEvents();
+                        return peer;
+
+                    } catch (e) {
+                        console.warn('[RTC] 服务器 ' + srv.host + ' 失败:', e && e.message);
+                        if (peer) {
+                            try { peer.destroy(); } catch(ex) {}
+                            peer = null;
+                        }
+                        // 继续尝试下一个服务器
                     }
-                });
-                peer.on('open', (id) => {
-                    myPeerId = id;
-                    console.log('[RTC] Peer ID:', id);
-                });
-                peer.on('connection', (conn) => {
-                    handleConnection(conn);
-                });
-                peer.on('error', (err) => {
-                    console.error('[RTC] Peer error:', err.type, err);
-                    if (err.type === 'peer-unavailable') {
-                        alert('无法找到该房间。房间可能已关闭或 ID 错误。');
-                    } else if (err.type === 'server-error') {
-                        alert('信令服务器连接失败，请检查网络后重试。');
-                    }
-                });
-                peer.on('disconnected', () => {
-                    console.warn('[RTC] Peer disconnected from signaling server');
-                });
-                return peer;
+                }
+
+                // 所有服务器都失败
+                throw new Error('所有信令服务器均无法连接。请检查网络或防火墙设置。');
+
             } catch (e) {
-                console.error('[RTC] Failed to init PeerJS:', e);
-                alert('无法加载实时协作库（PeerJS），请检查网络连接。');
+                console.error('[RTC] 初始化失败:', e);
+                alert('实时协作初始化失败:\n' + (e && e.message ? e.message : String(e)) +
+                    '\n\n可能原因:\n1. 网络无法访问 PeerJS 信令服务器\n2. 防火墙阻止了 WebSocket 连接\n3. 公司/学校网络限制了 P2P 连接');
                 return null;
             }
+        }
+
+        function setupPeerEvents() {
+            if (!peer) return;
+            peer.on('connection', (conn) => {
+                console.log('[RTC] 收到新连接请求:', conn.peer);
+                handleConnection(conn);
+            });
+            peer.on('disconnected', () => {
+                console.warn('[RTC] 与信令服务器断开连接，尝试重连...');
+                // 尝试重连
+                setTimeout(() => {
+                    if (peer && !peer.destroyed) {
+                        peer.reconnect();
+                    }
+                }, 3000);
+            });
+            peer.on('close', () => {
+                console.log('[RTC] Peer 连接已关闭');
+            });
         }
 
         function loadScript(src) {
@@ -688,13 +755,18 @@ export default {
             privacy = 'public';
             chatMessages = [];
 
+            console.log('[RTC] 房间已创建! RoomId:', roomId, 'Alias:', roomAlias, 'MyPeerId:', myPeerId);
+
             // 把当前工作区 XML 记录为初始状态
             try { pendingXml = getWorkspaceXml(); } catch(e) {}
 
             startCursorMonitor();
             render();
-            console.log('[RTC] Room created:', roomId);
-            alert('房间已创建！\n房间ID（用于邀请）: ' + roomId + (roomAlias ? '\n房间名: ' + roomAlias : '') + '\n请通过「复制房间URL」分享给他人。');
+            console.log('[RTC] 房间创建完成，等待他人加入...');
+            alert('房间已创建！\n\n房间ID（用于邀请）: ' + roomId +
+                (roomAlias ? '\n房间名: ' + roomAlias : '') +
+                '\n信令服务器: ' + PEERJS_SERVERS[currentServerIndex].host +
+                '\n\n请通过「复制房间URL」分享给他人。\n\n提示：对方需要能访问 PeerJS 信令服务器才能加入。');
         }
 
         async function joinRoom(id) {
@@ -706,24 +778,45 @@ export default {
             isHost = false;
             chatMessages = [];
 
+            console.log('[RTC] 正在加入房间:', id, '我的PeerId:', myPeerId);
+
             // 连接房主（房主的真实 peerId 即房间ID）
             const conn = p.connect(id, { reliable: true });
             handleConnection(conn);
 
-            // 超时提示：若 8 秒未连上，给出明确错误
+            // 超时提示：若 10 秒未连上，给出明确错误
             setTimeout(() => {
-                if (peer && roomId && Object.keys(connections).length === 0 && !isHost) {
-                    alert('连接超时：未能建立与房主的连接。请确认房间ID正确且房主在线。');
+                if (peer && roomId === id && Object.keys(connections).length === 0 && !isHost) {
+                    console.error('[RTC] 加入房间超时:', id);
+                    alert('连接超时：未能建立与房主的连接。\n\n可能原因:\n1. 房间ID错误或房主已离线\n2. 网络防火墙阻止了 P2P 连接\n3. 双方不在同一网络环境\n\n请确认房间ID正确后重试。');
                 }
-            }, 8000);
+            }, 10000);
 
             startCursorMonitor();
             render();
         }
 
         function handleConnection(conn) {
+            console.log('[RTC] handleConnection 开始, 目标:', conn.peer);
+
+            // 监听 ICE 连接状态变化（用于诊断）
+            conn.on('iceStateChange', (state) => {
+                console.log('[RTC] ICE 状态变化 (' + conn.peer + '):', state);
+            });
+
+            // 监听底层 DataChannel 的信号状态
+            if (conn.peerConnection) {
+                conn.peerConnection.oniceconnectionstatechange = () => {
+                    const state = conn.peerConnection.iceConnectionState;
+                    console.log('[RTC] WebRTC ICE Connection State (' + conn.peer + '):', state);
+                    if (state === 'failed' || state === 'disconnected') {
+                        alert('P2P 连接失败（ICE 状态: ' + state + '）。\n\n这通常意味着网络无法建立直连。\n建议：\n- 检查防火墙设置\n- 尝试使用相同网络\n- 使用手机热点测试');
+                    }
+                };
+            }
+
             conn.on('open', () => {
-                console.log('[RTC] Connected to:', conn.peer);
+                console.log('[RTC] ✓ 连接已建立! 对方:', conn.peer);
                 connections[conn.peer] = { conn, metadata: {} };
 
                 // 发送自己的用户信息
