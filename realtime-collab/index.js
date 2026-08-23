@@ -452,10 +452,10 @@ export default {
             body.appendChild(joinInput);
             const joinBtn = createElement('button', { className: 'rtc-btn rtc-btn-primary', textContent: '加入房间' });
             body.appendChild(joinBtn);
-            body.appendChild(createElement('div', { className: 'rtc-hint' },
-                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>' +
-                '<span>房主可以看到您的 IP 地址，其他成员不能。</span>'
-            ));
+            const joinHint = createElement('div', { className: 'rtc-hint' });
+            joinHint.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' +
+                '<span>房主可以看到您的 IP 地址，其他成员不能。</span>';
+            body.appendChild(joinHint);
 
             joinBtn.onclick = () => {
                 const id = joinInput.value.trim();
@@ -472,10 +472,10 @@ export default {
             body.appendChild(createElement('div', { style: 'font-size:13px;color:#5f6368;margin-bottom:8px;', textContent: '生成新的房间ID以开始与他人协作。分享房间URL邀请他人。' }));
             const createBtn = createElement('button', { className: 'rtc-btn rtc-btn-outline', textContent: '创建新房间' });
             body.appendChild(createBtn);
-            body.appendChild(createElement('div', { className: 'rtc-hint' },
-                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>' +
-                '<span>加入的人可以看到您的 IP 地址，您也可以看到他们的。</span>'
-            ));
+            const createHint = createElement('div', { className: 'rtc-hint' });
+            createHint.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' +
+                '<span>加入的人可以看到您的 IP 地址，您也可以看到他们的。</span>';
+            body.appendChild(createHint);
 
             createBtn.onclick = () => createRoom();
         }
@@ -512,9 +512,9 @@ export default {
 
             const chatBox = createElement('div', { className: 'rtc-chat-box' });
             chatMessages.forEach(m => {
-                chatBox.appendChild(createElement('div', { className: 'rtc-chat-msg' },
-                    '<span class="rtc-chat-msg-name">' + escapeHtml(m.name) + '</span>: ' + escapeHtml(m.text)
-                ));
+                const msgEl = createElement('div', { className: 'rtc-chat-msg' });
+                msgEl.innerHTML = '<span class="rtc-chat-msg-name">' + escapeHtml(m.name) + '</span>: ' + escapeHtml(m.text);
+                chatBox.appendChild(msgEl);
             });
             body.appendChild(chatBox);
             // 自动滚动到底部
