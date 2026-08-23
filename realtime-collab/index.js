@@ -350,6 +350,76 @@ export default {
   font-family: inherit; transition: background .15s, box-shadow .15s;
 }
 :global(.rtc-trigger-btn:hover) { background: #f8f9fa; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+
+/* 右下角 Toast 通知 */
+:global(.rtc-toast-container) {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 100001;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+:global(.rtc-toast) {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 4px 20px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.08);
+    min-width: 300px;
+    max-width: 400px;
+    animation: rtc-toast-in .3s ease-out;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@keyframes rtc-toast-in {
+    from { opacity: 0; transform: translateX(40px) scale(.95); }
+    to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes rtc-toast-out {
+    from { opacity: 1; transform: translateX(0) scale(1); }
+    to   { opacity: 0; transform: translateX(40px) scale(.95); }
+}
+:global(.rtc-toast-icon) {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: #e8f0fe;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+}
+:global(.rtc-toast-body) { flex: 1; min-width: 0; }
+:global(.rtc-toast-title) {
+    font-size: 14px; font-weight: 600; color: #202124;
+    margin-bottom: 2px;
+}
+:global(.rtc-toast-desc) {
+    font-size: 12px; color: #5f6368;
+}
+:global(.rtc-toast-actions) {
+    display: flex; gap: 6px; flex-shrink: 0;
+    margin-top: 8px;
+}
+:global(.rtc-toast-btn) {
+    padding: 5px 14px; border: none; border-radius: 6px;
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    font-family: inherit; transition: opacity .15s;
+}
+:global(.rtc-toast-btn:hover) { opacity: .85; }
+:global(.rtc-toast-approve) { background: #4db6ac; color: #fff; }
+:global(.rtc-toast-reject) { background: #ff7043; color: #fff; }
+:global(.rtc-toast-close) {
+    flex-shrink: 0; width: 24px; height: 24px;
+    border: none; border-radius: 50%; background: transparent;
+    cursor: pointer; color: #9aa0a6; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s;
+}
+:global(.rtc-toast-close:hover) { background: #f1f3f4; }
 `,
     setup: async function (ctx) {
         const { document, window, createElement, addToolbarButton, mountPanel, effect } = ctx;
@@ -440,6 +510,83 @@ export default {
 
         // ─── DOM 构建 ───
         const panel = createElement('div', { className: 'rtc-panel' });
+
+        // Toast 通知容器（右下角弹窗）
+        const toastContainer = createElement('div', { className: 'rtc-toast-container' });
+        document.body.appendChild(toastContainer);
+
+        // 音效：使用 Web Audio API 生成提示音（无需外部文件）
+        let audioCtx = null;
+        function playNotificationSound() {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const now = audioCtx.currentTime;
+                // 双音：高音→低音，模拟"叮咚"
+                [880, 660].forEach((freq, i) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.3, now + i * 0.15);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.35);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now + i * 0.15);
+                    osc.stop(now + i * 0.15 + 0.4);
+                });
+            } catch(e) {}
+        }
+
+        // 显示加入请求 Toast 通知
+        function showJoinRequestToast(peerId, name) {
+            // 避免重复弹出同一人的请求
+            const existing = toastContainer.querySelector('[data-peer-id="' + peerId + '"]');
+            if (existing) return;
+
+            playNotificationSound();
+
+            const toast = createElement('div', { className: 'rtc-toast' });
+            toast.dataset.peerId = peerId;
+            toast.innerHTML =
+                '<div class="rtc-toast-icon">🔔</div>' +
+                '<div class="rtc-toast-body">' +
+                '<div class="rtc-toast-title">新的加入请求</div>' +
+                '<div class="rtc-toast-desc"><strong>' + escapeHtml(name) + '</strong> 请求加入房间</div>' +
+                '<div class="rtc-toast-actions">' +
+                '<button class="rtc-toast-btn rtc-toast-approve">✓ 同意</button>' +
+                '<button class="rtc-toast-btn rtc-toast-reject">✕ 拒绝</button>' +
+                '</div></div>' +
+                '<button class="rtc-toast-close">×</button>';
+
+            // 同意按钮
+            toast.querySelector('.rtc-toast-approve').onclick = () => {
+                dismissToast(toast);
+                approveJoiner(peerId);
+            };
+            // 拒绝按钮
+            toast.querySelector('.rtc-toast-reject').onclick = () => {
+                dismissToast(toast);
+                rejectJoiner(peerId);
+            };
+            // 关闭按钮
+            toast.querySelector('.rtc-toast-close').onclick = () => dismissToast(toast);
+
+            toastContainer.appendChild(toast);
+
+            // 12秒后自动消失
+            setTimeout(() => {
+                if (toast.parentNode) dismissToast(toast);
+            }, 12000);
+        }
+
+        function dismissToast(toastEl) {
+            if (!toastEl || !toastEl.parentNode) return;
+            toastEl.style.animation = 'rtc-toast-out .25s ease-in forwards';
+            setTimeout(() => {
+                if (toastEl && toastEl.parentNode) toastEl.parentNode.removeChild(toastEl);
+            }, 260);
+        }
 
         // 最大化状态
         let isMaximized = false;
@@ -1224,7 +1371,9 @@ export default {
                         sendWorkspaceToPeer(conn);
                     }
                 } else {
-                    // 加入者侧：请求加入（房主决定是否需要审批）
+                    // 加入者侧：先记录房主连接（否则收到 join-approve 后找不到 conn 发 request-xml）
+                    connections[conn.peer] = { conn, metadata: { isHost: true } };
+                    // 请求加入（房主决定是否需要审批）
                     conn.send(JSON.stringify({ type: 'join-request', username: username }));
                 }
 
@@ -1272,12 +1421,14 @@ export default {
                     render();
                     break;
 
-                case 'join-request':
+            case 'join-request':
                     console.log('[RTC] 收到加入请求:', msg.username, fromPeerId);
                     if (isHost) {
                         // 标记待审批
                         if (connections[fromPeerId]) connections[fromPeerId].metadata = connections[fromPeerId].metadata || {};
                         pendingJoiners[fromPeerId] = { conn: (connections[fromPeerId] && connections[fromPeerId].conn) || null };
+                        // 触发右下角 Toast 通知
+                        showJoinRequestToast(fromPeerId, msg.username || '匿名用户');
                         render(); // 刷新审批列表
                     }
                     break;
@@ -1415,6 +1566,9 @@ export default {
         function approveJoiner(peerId) {
             approvedMembers[peerId] = true;
             delete pendingJoiners[peerId];
+            // 关闭对应的 Toast（如果存在）
+            const toast = toastContainer.querySelector('[data-peer-id="' + peerId + '"]');
+            if (toast) dismissToast(toast);
             const c = connections[peerId];
             if (c && c.conn) {
                 c.conn.send(JSON.stringify({ type: 'join-approve', from: myPeerId }));
@@ -1428,6 +1582,9 @@ export default {
                 try { c.conn.send(JSON.stringify({ type: 'join-reject', from: myPeerId })); } catch(e) {}
             }
             delete pendingJoiners[peerId];
+            // 关闭对应的 Toast
+            const toast = toastContainer.querySelector('[data-peer-id="' + peerId + '"]');
+            if (toast) dismissToast(toast);
             render();
         }
 
@@ -1719,6 +1876,8 @@ export default {
             stopCursorMonitor();
             clearAllRemoteCursors();
             if (cursorLayer && cursorLayer.parentNode) cursorLayer.parentNode.removeChild(cursorLayer);
+            if (toastContainer && toastContainer.parentNode) toastContainer.parentNode.removeChild(toastContainer);
+            if (audioCtx) { try { audioCtx.close(); } catch(e) {} }
             document.removeEventListener('mousemove', onDrag);
             document.removeEventListener('mousemove', onResize);
             document.removeEventListener('mouseup', endDrag);
