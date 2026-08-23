@@ -192,6 +192,11 @@ export default {
 :global(.rtc-room-id-box) { margin-top: 10px; }
 :global(.rtc-room-id-label) { font-size: 12px; color: #5f6368; margin-bottom: 4px; }
 :global(.rtc-room-id-box .rtc-input) { font-size: 12px; color: #5f6368; background: #f8f9fa; }
+:global(.rtc-conn-info) { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #5f6368; margin-bottom: 10px; }
+:global(.rtc-server-tag) { padding: 2px 8px; background: #e8f0fe; color: #1a73e8; border-radius: 10px; font-size: 11px; }
+:global(.rtc-loading) { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #5f6368; padding: 8px 0; }
+:global(.rtc-spinner) { width: 16px; height: 16px; border: 2px solid #dadce0; border-top-color: #1a73e8; border-radius: 50%; animation: rtc-spin .8s linear infinite; }
+@keyframes rtc-spin { to { transform: rotate(360deg); } }
 :global(.rtc-status) {
   display: flex; align-items: center; gap: 6px;
   font-size: 13px; color: #1e8e3e; margin-top: 4px;
@@ -386,6 +391,9 @@ export default {
         let roomAlias = '';        // 房主自定义的房间昵称（仅展示，不参与连接）
         let privacy = 'public';     // 'public' | 'private'
         let myPeerId = '';
+        let currentServerHost = '';   // 当前实际连接的信令服务器
+        let wsSyncStarted = false;    // 工作区同步是否已启动（避免重复绑定）
+        let connecting = false;       // 正在创建/加入房间
         let chatMessages = [];
         let pendingXml = null;      // 收到但暂缓应用的 XML（避免循环广播）
         let suppressBroadcast = false;
@@ -703,6 +711,8 @@ export default {
             joinBtn.onclick = () => {
                 const id = joinInput.value.trim();
                 if (!id) return alert('请输入房间ID');
+                connecting = true;
+                render();
                 joinRoom(id);
             };
             joinInput.onkeydown = (e) => { if (e.key === 'Enter') joinBtn.click(); };
@@ -722,17 +732,35 @@ export default {
             body.appendChild(createHint);
 
             createBtn.onclick = () => {
+                connecting = true;
+                render();
                 const id = createInput.value.trim();
                 createRoom(id || null);
             };
+
+            // 连接中提示
+            if (connecting) {
+                const loading = createElement('div', { className: 'rtc-loading' });
+                loading.innerHTML = '<div class="rtc-spinner"></div><span>正在连接信令服务器…</span>';
+                body.appendChild(loading);
+            }
         }
 
         function renderConnected(body) {
+            connecting = false; // 已进入连接视图，清除加载态
             // 房间信息
             const roomInfo = createElement('div', { className: 'rtc-section-title' });
-            roomInfo.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5f6368" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>' +
+            roomInfo.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5f6368" stroke-width="2"><path d="M21 15a2 2 0 01-2  erc4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>' +
                 '<span class="rtc-room-name">房间:' + escapeHtml(roomId) + (roomAlias ? '（' + escapeHtml(roomAlias) + '）' : '') + '</span>';
             body.appendChild(roomInfo);
+
+            // 连接状态 + 信令服务器
+            const infoRow = createElement('div', { className: 'rtc-conn-info' });
+            const peerCount = Object.keys(connections).length + 1;
+            infoRow.innerHTML = '<span class="rtc-status-dot"></span>' +
+                '<span>' + (peerCount) + ' 位在线</span>' +
+                '<span class="rtc-server-tag" title="当前信令服务器">🔗 ' + escapeHtml(currentServerHost || '—') + '</span>';
+            body.appendChild(infoRow);
 
             // 房主：显示可复制的房间ID（加入者凭此加入）
             if (isHost) {
@@ -751,11 +779,6 @@ export default {
                 idWrap.appendChild(idCopyBtn);
                 body.appendChild(idWrap);
             }
-
-            // 连接状态
-            const status = createElement('div', { className: 'rtc-status' });
-            status.innerHTML = '<span class="rtc-status-dot"></span><span>已连接 · ' + (Object.keys(connections).length + 1) + ' 位用户在线</span>';
-            body.appendChild(status);
 
             // 已连接用户
             body.appendChild(createElement('div', { className: 'rtc-users-title', textContent: '已连接用户' }));
@@ -899,6 +922,7 @@ export default {
                                 peer.on('open', (id) => {
                                     myPeerId = id;
                                     currentServerIndex = i;
+                                    currentServerHost = srv.host;
                                     console.log('[RTC] ✓ Peer 连接成功! Peer ID:', id, '服务器:', srv.host);
                                     resolve(id);
                                 });
@@ -1013,6 +1037,7 @@ export default {
                     alert('连接出错：' + (err.type || '未知错误') + '\n请重试或检查网络连接。');
                 }
                 // 重置未连接状态
+                connecting = false;
                 setTimeout(() => {
                     if (Object.keys(connections).length === 0 && !isHost) {
                         roomId = '';
@@ -1077,6 +1102,9 @@ export default {
                 if (!isHost) {
                     conn.send(JSON.stringify({ type: 'request-xml' }));
                 }
+
+                // 连接成功后启动工作区同步（仅一次）
+                ensureWorkspaceSync();
 
                 render();
             });
@@ -1167,14 +1195,15 @@ export default {
         // ─── Blockly 工作区同步 ───
         let workspaceChangeListener = null;
 
-        function startWorkspaceSync() {
+        function ensureWorkspaceSync() {
+            if (wsSyncStarted) return;
+            wsSyncStarted = true;
             try {
                 const ws = ctx.getWorkspace ? ctx.getWorkspace() : null;
-                if (!ws) return;
-
+                if (!ws) { wsSyncStarted = false; return; }
                 workspaceChangeListener = function(event) {
                     if (suppressBroadcast) return;
-                    // 防抖：不要每个事件都广播，用 requestAnimationFrame 合并
+                    // 防抖：合并高频事件
                     if (workspaceChangeListener._raf) return;
                     workspaceChangeListener._raf = requestAnimationFrame(() => {
                         workspaceChangeListener._raf = null;
@@ -1186,6 +1215,7 @@ export default {
                 };
                 ws.addChangeListener(workspaceChangeListener);
             } catch(e) {
+                wsSyncStarted = false;
                 console.warn('[RTC] Cannot attach workspace listener:', e);
             }
         }
@@ -1195,9 +1225,10 @@ export default {
                 const ws = ctx.getWorkspace ? ctx.getWorkspace() : null;
                 if (ws && workspaceChangeListener) {
                     ws.removeChangeListener(workspaceChangeListener);
-                    workspaceChangeListener = null;
                 }
             } catch(e) {}
+            workspaceChangeListener = null;
+            wsSyncStarted = false;
         }
 
         function getWorkspaceXml() {
@@ -1371,13 +1402,11 @@ export default {
         // 检查 URL 是否带房间ID
         checkUrlForRoom();
 
-        // 当进入房间后启动工作区同步
+        // 当进入房间后启动工作区同步（仅在连接成功时由 handleConnection 触发）
         const originalRender = render;
         render = function() {
             originalRender();
-            if (peer && roomId) {
-                startWorkspaceSync();
-            } else {
+            if (!peer || !roomId) {
                 stopWorkspaceSync();
             }
         };
