@@ -6,51 +6,56 @@ export default {
     css: `
 :global(.rtc-panel) {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 520px;
-  max-width: 92vw;
-  max-height: 85vh;
+  top: 60px;
+  right: 20px;
+  width: 420px;
+  height: 560px;
+  max-height: calc(100vh - 80px);
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.25);
+  border-radius: 10px;
+  box-shadow: 0 8px 40px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.08);
   z-index: 99999;
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
+  resize: both;
+  min-width: 340px;
+  min-height: 400px;
 }
 :global(.rtc-header) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px;
+  padding: 12px 16px;
+  background: #f8f9fa;
   border-bottom: 1px solid #e8eaed;
+  border-radius: 10px 10px 0 0;
   user-select: none;
   flex-shrink: 0;
+  cursor: default;
 }
 :global(.rtc-header-title) {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: #202124;
 }
 :global(.rtc-header-btns) {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 :global(.rtc-header-btn) {
-  width: 28px; height: 28px;
+  width: 26px; height: 26px;
   border: none; border-radius: 6px;
   background: transparent;
-  font-size: 16px;
+  font-size: 14px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   color: #5f6368;
-  transition: background .15s;
+  transition: background .1s;
 }
-:global(.rtc-header-btn:hover) { background: #f1f3f4; }
-:global(.rtc-body) { padding: 16px 20px; overflow-y: auto; flex: 1; }
+:global(.rtc-header-btn:hover) { background: #e8eaed; }
+:global(.rtc-body) { padding: 12px 16px; overflow-y: auto; flex: 1; }
 :global(.rtc-alpha-banner) {
   background: #fef7e0;
   border: 1px solid #fdd663;
@@ -227,17 +232,86 @@ export default {
         // ─── DOM 构建 ───
         const panel = createElement('div', { className: 'rtc-panel' });
 
+        // 最大化状态
+        let isMaximized = false;
+        let savedBounds = null;
+
+        // 拖拽功能
+        let dragState = null;
+        function startDrag(e) {
+            if (isMaximized) return;
+            if (e.target.closest('.rtc-header-btn')) return;
+            const rect = panel.getBoundingClientRect();
+            dragState = {
+                startX: e.clientX,
+                startY: e.clientY,
+                origLeft: rect.left,
+                origTop: rect.top,
+                origW: rect.width,
+                origH: rect.height
+            };
+            e.preventDefault();
+        }
+        function onDrag(e) {
+            if (!dragState) return;
+            const dx = e.clientX - dragState.startX;
+            const dy = e.clientY - dragState.startY;
+            let newLeft = dragState.origLeft + dx;
+            let newTop = dragState.origTop + dy;
+            // 边界约束
+            newTop = Math.max(0, Math.min(newTop, window.innerHeight - 60));
+            newLeft = Math.max(-dragState.origW + 80, Math.min(newLeft, window.innerWidth - 80));
+            panel.style.left = newLeft + 'px';
+            panel.style.top = newTop + 'px';
+            panel.style.right = 'auto';
+            panel.style.transform = 'none';
+        }
+        function endDrag() { dragState = null; }
+
+        function toggleMaximize() {
+            if (!isMaximized) {
+                // 保存当前位置尺寸
+                const rect = panel.getBoundingClientRect();
+                savedBounds = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+                // 最大化：撑满屏幕（留边距）
+                panel.style.top = '8px';
+                panel.style.left = '8px';
+                panel.style.right = '8px';
+                panel.style.width = '';
+                panel.style.height = 'calc(100vh - 16px)';
+                panel.style.transform = 'none';
+                isMaximized = true;
+            } else {
+                // 还原
+                if (savedBounds) {
+                    panel.style.top = savedBounds.top + 'px';
+                    panel.style.left = savedBounds.left + 'px';
+                    panel.style.right = 'auto';
+                    panel.style.width = savedBounds.width + 'px';
+                    panel.style.height = savedBounds.height + 'px';
+                    panel.style.transform = 'none';
+                }
+                isMaximized = false;
+            }
+            render();
+        }
+
         function render() {
             panel.innerHTML = '';
 
-            // Header
+            // Header（可拖拽）
             const header = createElement('div', { className: 'rtc-header' });
             header.innerHTML = '<span class="rtc-header-title">实时协作</span>' +
                 '<div class="rtc-header-btns">' +
                 '<button class="rtc-header-btn" title="最小化">−</button>' +
+                '<button class="rtc-header-btn" title="' + (isMaximized ? '还原' : '最大化') + '">' + (isMaximized ? '❐' : '□') + '</button>' +
                 '<button class="rtc-header-btn" title="关闭">×</button></div>';
             panel.appendChild(header);
+
+            // 拖拽事件
+            header.addEventListener('mousedown', startDrag);
             header.querySelector('[title="最小化"]').onclick = () => { panel.style.display = 'none'; };
+            header.querySelector('[title="' + (isMaximized ? '还原' : '最大化') + '"]').onclick = toggleMaximize;
             header.querySelector('[title="关闭"]').onclick = closePanel;
 
             const body = createElement('div', { className: 'rtc-body' });
@@ -722,6 +796,10 @@ export default {
         panel.style.display = 'none';
         document.body.appendChild(panel);
 
+        // 全局拖拽事件
+        document.addEventListener('mousemove', onDrag);
+        document.addEventListener('mouseup', endDrag);
+
         // 添加工具栏触发按钮
         const triggerBtn = addToolbarButton('🤝 实时协作', () => {
             panel.style.display = panel.style.display === 'none' ? '' : 'none';
@@ -745,6 +823,8 @@ export default {
         // 清理函数
         return function cleanup() {
             leaveRoom();
+            document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('mouseup', endDrag);
             if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
             if (triggerBtn && triggerBtn.parentNode) triggerBtn.parentNode.removeChild(triggerBtn);
         };
