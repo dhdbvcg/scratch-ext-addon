@@ -284,7 +284,8 @@ export default {
         let connections = {};       // peerId -> { conn, metadata }
         let isHost = false;
         let roomId = '';
-        let privacy = 'public';     // 'public' | 'private'
+        let roomAlias = '';        // 房主自定义的房间昵称（仅展示，不参与连接）
+        let privacy = 'public';     // '  public' | 'private'
         let myPeerId = '';
         let chatMessages = [];
         let pendingXml = null;      // 收到但暂缓应用的 XML（避免循环广播）
@@ -519,7 +520,7 @@ export default {
             // 房间信息
             const roomInfo = createElement('div', { className: 'rtc-section-title' });
             roomInfo.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5f6368" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>' +
-                '<span class="rtc-room-name">房间:' + escapeHtml(roomId) + '</span>';
+                '<span class="rtc-room-name">房间:' + escapeHtml(roomId) + (roomAlias ? '（' + escapeHtml(roomAlias) + '）' : '') + '</span>';
             body.appendChild(roomInfo);
 
             // 连接状态
@@ -679,8 +680,10 @@ export default {
             if (!p) return;
             await new Promise((resolve) => { p.open ? resolve() : p.on('open', resolve); });
 
-            // 房主自定义房间ID，未填写则随机生成
-            roomId = roomIdToUse || generateRoomId();
+            // 关键修正：房间ID 必须使用 PeerJS 分配的真实 peerId，
+            // 否则加入者 p.connect(roomId) 找不到房主。
+            roomId = myPeerId;
+            roomAlias = roomIdToUse || '';   // 自定义ID仅作备注展示，不参与连接
             isHost = true;
             privacy = 'public';
             chatMessages = [];
@@ -691,7 +694,7 @@ export default {
             startCursorMonitor();
             render();
             console.log('[RTC] Room created:', roomId);
-            alert('房间已创建！房间ID: ' + roomId + '\n请通过「复制房间URL」分享给他人。');
+            alert('房间已创建！\n房间ID（用于邀请）: ' + roomId + (roomAlias ? '\n房间名: ' + roomAlias : '') + '\n请通过「复制房间URL」分享给他人。');
         }
 
         async function joinRoom(id) {
@@ -703,9 +706,16 @@ export default {
             isHost = false;
             chatMessages = [];
 
-            // 连接房主（房主的 peerId 约定为房间ID）
+            // 连接房主（房主的真实 peerId 即房间ID）
             const conn = p.connect(id, { reliable: true });
             handleConnection(conn);
+
+            // 超时提示：若 8 秒未连上，给出明确错误
+            setTimeout(() => {
+                if (peer && roomId && Object.keys(connections).length === 0 && !isHost) {
+                    alert('连接超时：未能建立与房主的连接。请确认房间ID正确且房主在线。');
+                }
+            }, 8000);
 
             startCursorMonitor();
             render();
