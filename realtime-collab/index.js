@@ -500,7 +500,8 @@ export default {
 
             // 创建新房间
             body.appendChild(createElement('div', { className: 'rtc-field-label', textContent: '创建新房间' }));
-            body.appendChild(createElement('div', { style: 'font-size:13px;color:#5f6368;margin-bottom:8px;', textContent: '生成新的房间ID以开始与他人协作。分享房间URL邀请他人。' }));
+            const createInput = createElement('input', { className: 'rtc-input', placeholder: '设置房间ID（留空自动生成）' });
+            body.appendChild(createInput);
             const createBtn = createElement('button', { className: 'rtc-btn rtc-btn-outline', textContent: '创建新房间' });
             body.appendChild(createBtn);
             const createHint = createElement('div', { className: 'rtc-hint' });
@@ -508,7 +509,10 @@ export default {
                 '<span>加入的人可以看到您的 IP 地址，您也可以看到他们的。</span>';
             body.appendChild(createHint);
 
-            createBtn.onclick = () => createRoom();
+            createBtn.onclick = () => {
+                const id = createInput.value.trim();
+                createRoom(id || null);
+            };
         }
 
         function renderConnected(body) {
@@ -670,13 +674,13 @@ export default {
             });
         }
 
-        async function createRoom() {
+        async function createRoom(roomIdToUse) {
             const p = await initPeer();
             if (!p) return;
             await new Promise((resolve) => { p.open ? resolve() : p.on('open', resolve); });
 
-            // 用 peerId 后缀生成短房间ID
-            roomId = generateRoomId();
+            // 房主自定义房间ID，未填写则随机生成
+            roomId = roomIdToUse || generateRoomId();
             isHost = true;
             privacy = 'public';
             chatMessages = [];
