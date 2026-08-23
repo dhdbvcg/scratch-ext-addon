@@ -189,6 +189,9 @@ export default {
 
 /* 已连接状态 */
 :global(.rtc-room-name) { font-size: 15px; font-weight: 600; color: #202124; }
+:global(.rtc-room-id-box) { margin-top: 10px; }
+:global(.rtc-room-id-label) { font-size: 12px; color: #5f6368; margin-bottom: 4px; }
+:global(.rtc-room-id-box .rtc-input) { font-size: 12px; color: #5f6368; background: #f8f9fa; }
 :global(.rtc-status) {
   display: flex; align-items: center; gap: 6px;
   font-size: 13px; color: #1e8e3e; margin-top: 4px;
@@ -731,6 +734,24 @@ export default {
                 '<span class="rtc-room-name">房间:' + escapeHtml(roomId) + (roomAlias ? '（' + escapeHtml(roomAlias) + '）' : '') + '</span>';
             body.appendChild(roomInfo);
 
+            // 房主：显示可复制的房间ID（加入者凭此加入）
+            if (isHost) {
+                const idWrap = createElement('div', { className: 'rtc-room-id-box' });
+                const idLabel = createElement('div', { className: 'rtc-room-id-label', textContent: '房间ID（分享给协作者）' });
+                idWrap.appendChild(idLabel);
+                const idInput = createElement('input', { className: 'rtc-input', value: roomId, readonly: true });
+                idWrap.appendChild(idInput);
+                const idCopyBtn = createElement('button', { className: 'rtc-btn rtc-btn-outline', textContent: '📋 复制房间ID', style: 'margin-top:6px;' });
+                idCopyBtn.onclick = () => {
+                    navigator.clipboard.writeText(roomId).then(() => {
+                        idCopyBtn.textContent = '✓ 已复制';
+                        setTimeout(() => { idCopyBtn.textContent = '📋 复制房间ID'; }, 2000);
+                    }).catch(() => { idInput.select(); document.execCommand && document.execCommand('copy'); });
+                };
+                idWrap.appendChild(idCopyBtn);
+                body.appendChild(idWrap);
+            }
+
             // 连接状态
             const status = createElement('div', { className: 'rtc-status' });
             status.innerHTML = '<span class="rtc-status-dot"></span><span>已连接 · ' + (Object.keys(connections).length + 1) + ' 位用户在线</span>';
@@ -752,7 +773,7 @@ export default {
 
             // 聊天
             body.appendChild(createElement('hr', { className: 'rtc-divider' }));
-            body.appendChild(createElement('div', { className: 'rtc-chat-title', textContent: '按 / 进行聊天' }));
+            body.appendChild(createElement('div', { className: '  chat-title', textContent: '聊天' }));
 
             const chatBox = createElement('div', { className: 'rtc-chat-box' });
             chatMessages.forEach(m => {
@@ -967,10 +988,6 @@ export default {
             startCursorMonitor();
             render();
             console.log('[RTC] 房间创建完成，等待他人加入...');
-            alert('房间已创建！\n\n房间ID（用于邀请）: ' + roomId +
-                (roomAlias ? '\n房间名: ' + roomAlias : '') +
-                '\n信令服务器: ' + PEERJS_SERVERS[currentServerIndex].host +
-                '\n\n请通过「复制房间URL」分享给他人。\n\n提示：对方需要能访问 PeerJS 信令服务器才能加入。');
         }
 
         async function joinRoom(id) {
@@ -986,13 +1003,31 @@ export default {
 
             // 连接房主（房主的真实 peerId 即房间ID）
             const conn = p.connect(id, { reliable: true });
+
+            // 连接层级的即时错误反馈（peer-unavailable 等）
+            conn.on('error', (err) => {
+                console.error('[RTC] 连接失败:', err.type, err);
+                if (err.type === 'peer-unavailable') {
+                    alert('无法加入：房间不存在或房主已离线。\n\n请确认房间ID正确，且房主当前在线。');
+                } else {
+                    alert('连接出错：' + (err.type || '未知错误') + '\n请重试或检查网络连接。');
+                }
+                // 重置未连接状态
+                setTimeout(() => {
+                    if (Object.keys(connections).length === 0 && !isHost) {
+                        roomId = '';
+                        render();
+                    }
+                }, 300);
+            });
+
             handleConnection(conn);
 
             // 超时提示：若 10 秒未连上，给出明确错误
             setTimeout(() => {
                 if (peer && roomId === id && Object.keys(connections).length === 0 && !isHost) {
                     console.error('[RTC] 加入房间超时:', id);
-                    alert('连接超时：未能建立与房主的连接。\n\n可能原因:\n1. 房间ID错误或房主已离线\n2. 网络防火墙阻止了 P2P 连接\n3. 双方不在同一网络环境\n\n请确认房间ID正确后重试。');
+                    alert('连接超时：未能建立与房主的连接。\n\n可能原因:\n1. 房间ID错误或房主已离线\n2. 网络防火墙阻止了 P2P 连接\n3. 双方 NAT 类型不兼容\n\n建议：双方使用同一网络或手机热点测试。');
                 }
             }, 10000);
 
@@ -1232,6 +1267,21 @@ export default {
             if (cursorMonitorActive) return;
             cursorMonitorActive = true;
             document.addEventListener('mousemove', onCursorMove);
+            document.addEventListener('keydown', onHotkey);
+        }
+        function stopCursorMonitor() {
+            cursorMonitorActive = false;
+            document.removeEventListener('mousemove', onCursorMove);
+            document.removeEventListener('keydown', onHotkey);
+        }
+        function onHotkey(e) {
+            // 按 / 聚焦聊天输入框（仿原版 Scratch 协作）
+            if (e.key === '/' && peer && roomId) {
+                const tag = (e.target && e.target.tagName) || '';
+                if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                const box = panel.querySelector('.rtc-chat-input');
+                if (box) { e.preventDefault(); box.focus(); }
+            }
         }
         function stopCursorMonitor() {
             cursorMonitorActive = false;
