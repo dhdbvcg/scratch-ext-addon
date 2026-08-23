@@ -37,10 +37,10 @@
       "category": "编辑器"
     },
     {
-      "dir": "realtime-collab",
-      "name": "实时协作",
-      "description": "多人实时协作编辑扩展制作器。支持创建/加入房间、在线用户列表、聊天、Blockly 工作区实时同步、房间隐私设置。基于 WebRTC（PeerJS）点对点连接。",
-      "category": "协作"
+      "dir": "extedit-ai",
+      "name": "扩展编辑AI",
+      "description": "AI 助手，帮你编写/修改 Scratch / TurboWarp 扩展积木与代码。支持 OpenAI / 智谱 / DeepSeek / Anthropic 等模型，内置工作区读取、积木搜索、代码导出等工具调用。派生自 Gandi 插件 ai-assistant（Bilup Nova）。",
+      "category": "编辑器"
     }
   ]
 }

@@ -13,6 +13,7 @@ ExtensionBuilder（Scratch / TurboWarp 扩展编辑器）的独立插件集合�
 | `editor-number-arrow-keys/` | editor-number-arrow-keys | 数字框 ↑↓ 微调 | 编辑器 | 方向键微调数值 |
 | `transparent-orphans/` | transparent-orphans | 孤立积木半透明 | 视觉 | 未接线积木半透明 |
 | `developer-tools/` | developer-tools | 更多右键菜单栏 | 编辑器 | 复制/剪切/粘贴/增强整理 |
+| `extedit-ai/` | extedit-ai | 扩展编辑AI | 编辑器 | AI 编写/修改积木与代码（AGPL-3.0） |
 
 ## 安装（DeepSeek-Harness 风格）
 
