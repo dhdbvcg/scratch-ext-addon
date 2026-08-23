@@ -1006,6 +1006,7 @@ export default {
             try { pendingXml = getWorkspaceXml(); } catch(e) {}
 
             startCursorMonitor();
+            startHeartbeat();
             render();
             console.log('[RTC] 房间创建完成，等待他人加入...');
         }
@@ -1137,11 +1138,15 @@ export default {
                     if (connections[fromPeerId]) {
                         connections[fromPeerId].metadata = msg;
                     }
+                    // 房主作为中继：把新成员信息转发给其他人
+                    if (isHost) relay(msg, fromPeerId);
                     render();
                     break;
 
                 case 'chat':
                     addChatMessage(msg.name || '未知', msg.text || '');
+                    // 房主作为中继：把聊天转发给其他人
+                    if (isHost) relay(msg, fromPeerId);
                     render();
                     break;
 
@@ -1151,6 +1156,9 @@ export default {
                         try { setWorkspaceXml(msg.xml); } catch(e) {}
                         setTimeout(() => { suppressBroadcast = false; }, 500);
                     }
+                    // 房主作为中继：把工作区变更转发给其他成员（排除发送者）
+                    // 避免回声风暴：仅当此消息不是「已被中继过」的才转发
+                    if (isHost && !msg.relayed) relay(msg, fromPeerId);
                     break;
 
                 case 'request-xml':
@@ -1167,6 +1175,8 @@ export default {
 
                 case 'privacy':
                     privacy = msg.value || 'public';
+                    // 房主作为中继：转发隐私设置
+                    if (isHost) relay(msg, fromPeerId);
                     render();
                     break;
 
@@ -1175,11 +1185,27 @@ export default {
                         const senderName = (connections[fromPeerId] && connections[fromPeerId].metadata && connections[fromPeerId].metadata.username) || '?';
                         updateRemoteCursor(fromPeerId, senderName, msg.x, msg.y);
                     }
+                    // 房主作为中继：转发远程光标给其他成员
+                    if (isHost) relay(msg, fromPeerId);
                     break; // 不触发 render（光标更新太频繁）
 
                 default:
                     break;
             }
+        }
+
+        // 房主作为中继：把消息转发给除发送者外的所有其他成员
+        function relay(msgObj, excludePeerId) {
+            // 标记为「已被中继」，接收方（房主）不再二次转发，避免回声风暴
+            const relayMsg = Object.assign({}, msgObj, { relayed: true });
+            const data = JSON.stringify(relayMsg);
+            Object.keys(connections).forEach(peerId => {
+                if (peerId === excludePeerId) return;
+                const c = connections[peerId];
+                if (c && c.conn) {
+                    try { c.conn.send(data); } catch(e) {}
+                }
+            });
         }
 
         function broadcast(msgObj) {
@@ -1230,6 +1256,22 @@ export default {
             } catch(e) {}
             workspaceChangeListener = null;
             wsSyncStarted = false;
+        }
+
+        // 房主定时心跳：周期性把最新工作区同步给所有成员，避免成员断连重连后状态不一致
+        let heartbeatTimer = null;
+        function startHeartbeat() {
+            if (heartbeatTimer) return;
+            heartbeatTimer = setInterval(() => {
+                if (!isHost || !peer) return;
+                try {
+                    const xml = getWorkspaceXml();
+                    broadcast({ type: 'workspace-xml', xml: xml, from: myPeerId, relayed: true });
+                } catch(e) {}
+            }, 30000);
+        }
+        function stopHeartbeat() {
+            if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
         }
 
         function getWorkspaceXml() {
@@ -1323,10 +1365,6 @@ export default {
                 if (box) { e.preventDefault(); box.focus(); }
             }
         }
-        function stopCursorMonitor() {
-            cursorMonitorActive = false;
-            document.removeEventListener('mousemove', onCursorMove);
-        }
         function onCursorMove(e) {
             if (!roomId || !peer) return;
             broadcastCursor(e.clientX, e.clientY);
@@ -1356,6 +1394,7 @@ export default {
         function leaveRoom() {
             stopWorkspaceSync();
             stopCursorMonitor();
+            stopHeartbeat();
             clearAllRemoteCursors();
             Object.values(connections).forEach(c => {
                 try { c.conn.close(); } catch(e) {}
