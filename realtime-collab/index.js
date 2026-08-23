@@ -886,17 +886,13 @@ export default {
                     console.log('[RTC] PeerJS 库加载完成');
                 }
 
-                // 构建服务器列表：用户配置优先，然后是内置备选
+                // 构建服务器列表：用户配置优先，然后是内置备选（去重，避免重复尝试同一主机）
                 const cfg = serverConfig;
                 const servers = [];
-                if (cfg.host && cfg.host !== 'peerjs.com') {
-                    servers.push({ host: cfg.host, port: cfg.port || 443, path: cfg.path || '/', key: cfg.key || undefined, secure: cfg.secure !== false });
-                }
-                // 用户配置作为第一优先级（即使也是 peerjs.com）
-                servers.push({ host: cfg.host || 'peerjs.com', port: cfg.port || 443, path: cfg.path || '/', key: cfg.key || undefined, secure: cfg.secure !== false });
-                // 内置备选
+                const userSrv = { host: cfg.host || 'peerjs.com', port: cfg.port || 443, path: cfg.path || '/', key: cfg.key || undefined, secure: cfg.secure !== false };
+                servers.push(userSrv);
                 PEERJS_SERVERS.forEach(s => {
-                    if (s.host !== cfg.host) servers.push(s);
+                    if (s.host !== userSrv.host) servers.push(s);
                 });
 
                 // 按优先级尝试各个信令服务器
@@ -1031,13 +1027,13 @@ export default {
             // 连接层级的即时错误反馈（peer-unavailable 等）
             conn.on('error', (err) => {
                 console.error('[RTC] 连接失败:', err.type, err);
+                connecting = false;
                 if (err.type === 'peer-unavailable') {
                     alert('无法加入：房间不存在或房主已离线。\n\n请确认房间ID正确，且房主当前在线。');
                 } else {
                     alert('连接出错：' + (err.type || '未知错误') + '\n请重试或检查网络连接。');
                 }
                 // 重置未连接状态
-                connecting = false;
                 setTimeout(() => {
                     if (Object.keys(connections).length === 0 && !isHost) {
                         roomId = '';
@@ -1046,13 +1042,18 @@ export default {
                 }, 300);
             });
 
+            conn.on('open', () => { connecting = false; });
+
             handleConnection(conn);
 
-            // 超时提示：若 10 秒未连上，给出明确错误
+            // 超时提示：若 10 秒未连上，给出明确错误并回到可重试界面
             setTimeout(() => {
+                connecting = false;
                 if (peer && roomId === id && Object.keys(connections).length === 0 && !isHost) {
                     console.error('[RTC] 加入房间超时:', id);
                     alert('连接超时：未能建立与房主的连接。\n\n可能原因:\n1. 房间ID错误或房主已离线\n2. 网络防火墙阻止了 P2P 连接\n3. 双方 NAT 类型不兼容\n\n建议：双方使用同一网络或手机热点测试。');
+                    roomId = '';
+                    render();
                 }
             }, 10000);
 
@@ -1240,6 +1241,14 @@ export default {
         function setWorkspaceXml(xmlDom) {
             const ws = ctx.getWorkspace ? ctx.getWorkspace() : null;
             if (!ws) return;
+            // 序列化对比：若与当前工作区一致则跳过，避免无意义重建（清空选区/光标/闪烁）
+            try {
+                const cur = ctx.Blockly.Xml.workspaceToDom(ws);
+                const curStr = ctx.Blockly.Xml.domToText(cur);
+                const newStr = ctx.Blockly.Xml.domToText(xmlDom);
+                if (curStr === newStr) return;
+            } catch (e) {}
+
             ws.clear();
             ctx.Blockly.Xml.domToWorkspace(xmlDom, ws);
         }
