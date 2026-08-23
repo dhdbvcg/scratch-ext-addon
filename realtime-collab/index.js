@@ -263,11 +263,23 @@ export default {
         const STORAGE_PREFIX = 'rtc_collab_';
 
         // ─── 状态 ───
-        let username = localStorage.getItem(STORAGE_PREFIX + 'username') || '';
+        // 优先使用 ExtensionBuilder 登录系统的用户名
+        let username = '';
+        try {
+            const sessionRaw = localStorage.getItem('extbuilder_session') || sessionStorage.getItem('extbuilder_session');
+            if (sessionRaw) {
+                const s = JSON.parse(sessionRaw);
+                if (s && s.username) username = s.username;
+            }
+        } catch(e) {}
+        // 回退：localStorage 旧值或随机生成
+        if (!username) {
+            username = localStorage.getItem(STORAGE_PREFIX + 'username') || '';
+        }
         if (!username) {
             username = 'player' + Math.floor(Math.random() * 9000 + 1000);
-            localStorage.setItem(STORAGE_PREFIX + 'username', username);
         }
+        localStorage.setItem(STORAGE_PREFIX + 'username', username);
         let peer = null;
         let connections = {};       // peerId -> { conn, metadata }
         let isHost = false;
