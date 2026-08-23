@@ -244,6 +244,81 @@ export default {
 :global(.rtc-privacy-opt-name) { font-size: 14px; font-weight: 500; color: #202124; }
 :global(.rtc-privacy-opt-desc) { font-size: 12px; color: #5f6368; margin-top: 2px; }
 
+/* 连接设置弹窗 */
+:global(.rtc-settings-overlay) {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,.35); z-index: 100000;
+  display: flex; align-items: center; justify-content: center;
+}
+:global(.rtc-settings-dialog) {
+  background: #fff; border-radius: 10px;
+  width: 480px; max-width: 90vw; max-height: 85vh;
+  box-shadow: 0 8px 40px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.1);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+:global(.rtc-settings-header) {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid #e8eaed;
+  flex-shrink: 0;
+}
+:global(.rtc-settings-header-title) {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 15px; font-weight: 600; color: #202124;
+}
+:global(.rtc-settings-header-title svg) { flex-shrink: 0; }
+:global(.rtc-settings-close) {
+  width: 30px; height: 30px; border: none; border-radius: 50%;
+  background: transparent; cursor: pointer; color: #5f6368;
+  font-size: 18px; display: flex; align-items: center; justify-content: center;
+  transition: background .15s;
+}
+:global(.rtc-settings-close:hover) { background: #f1f3f4; }
+:global(.rtc-settings-body) { padding: 16px 20px; overflow-y: auto; flex: 1; }
+:global(.rtc-settings-subtitle) {
+  font-size: 14px; font-weight: 600; color: #202124;
+  margin-bottom: 14px;
+}
+:global(.rtc-settings-field) { margin-bottom: 12px; }
+:global(.rtc-settings-label) {
+  font-size: 13px; font-weight: 500; color: #202124;
+  margin-bottom: 4px; display: block;
+}
+:global(.rtc-settings-input) {
+  width: 100%; box-sizing: border-box;
+  padding: 9px 12px; border: 1px solid #dadce0;
+  border-radius: 8px; font-size: 14px; outline: none;
+  transition: border-color .2s, box-shadow .2s;
+  font-family: inherit;
+}
+:global(.rtc-settings-input:focus) { border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26,115,232,.12); }
+:global(.rtc-settings-checkbox-row) {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 16px; cursor: pointer;
+}
+:global(.rtc-settings-checkbox-row input[type="checkbox"]) {
+  width: 16px; height: 16px; accent-color: #1a73e8; cursor: pointer;
+}
+:global(.rtc-settings-checkbox-label) {
+  font-size: 13px; color: #5f6368; cursor: pointer; user-select: none;
+}
+:global(.rtc-settings-footer) {
+  display: flex; gap: 10px; justify-content: flex-end;
+  padding: 14px 20px; border-top: 1px solid #e8eaed;
+  flex-shrink: 0;
+}
+:global(.rtc-settings-btn-cancel) {
+  padding: 9px 24px; border: 1px solid #dadce0; border-radius: 8px;
+  background: #fff; color: #5f6368; font-size: 14px; font-weight: 500;
+  cursor: pointer; font-family: inherit; transition: background .15s;
+}
+:global(.rtc-settings-btn-cancel:hover) { background: #f8f9fa; }
+:global(.rtc-settings-btn-save) {
+  padding: 9px 28px; border: none; border-radius: 8px;
+  background: #4db6ac; color: #fff; font-size: 14px; font-weight: 500;
+  cursor: pointer; font-family: inherit; transition: opacity .15s;
+}
+:global(.rtc-settings-btn-save:hover) { opacity: .88; }
+
 /* 触发按钮（在 ExtensionBuilder 工具栏） */
 :global(.rtc-trigger-btn) {
   display: inline-flex; align-items: center; gap: 6px;
@@ -311,6 +386,22 @@ export default {
         let chatMessages = [];
         let pendingXml = null;      // 收到但暂缓应用的 XML（避免循环广播）
         let suppressBroadcast = false;
+
+        // ─── 连接设置 ───
+        const SETTINGS_KEY = STORAGE_PREFIX + 'server_config';
+        let serverConfig = loadServerConfig();
+
+        function loadServerConfig() {
+            try {
+                const raw = localStorage.getItem(SETTINGS_KEY);
+                if (raw) return JSON.parse(raw);
+            } catch(e) {}
+            return { host: 'peerjs.com', port: 443, key: '', path: '/', secure: true };
+        }
+        function saveServerConfig(cfg) {
+            serverConfig = Object.assign({}, serverConfig, cfg);
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(serverConfig));
+        }
 
         // ─── DOM 构建 ───
         const panel = createElement('div', { className: 'rtc-panel' });
@@ -486,12 +577,108 @@ export default {
             }
         }
 
+        // ─── 连接设置面板 ───
+        let settingsOverlay = null;
+
+        function showSettings() {
+            if (settingsOverlay) { closeSettings(); return; }
+            const cfg = serverConfig;
+
+            settingsOverlay = createElement('div', { className: 'rtc-settings-overlay' });
+
+            const dialog = createElement('div', { className: 'rtc-settings-dialog' });
+
+            // Header
+            const hdr = createElement('div', { className: 'rtc-settings-header' });
+            hdr.innerHTML = '<div class="rtc-settings-header-title">' +
+                '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>' +
+                '<span>连接设置</span></div>';
+            const closeBtn = createElement('button', { className: 'rtc-settings-close', textContent: '×' });
+            closeBtn.onclick = () => closeSettings();
+            hdr.appendChild(closeBtn);
+            dialog.appendChild(hdr);
+
+            // Body
+            const body = createElement('div', { className: 'rtc-settings-body' });
+            body.innerHTML = '<div class="rtc-settings-subtitle">PeerJS 服务器配置</div>';
+
+            // 主机
+            body.appendChild(createElement('label', { className: 'rtc-settings-label', textContent: '主机' }));
+            const hostInput = createElement('input', { className: 'rtc-settings-input', value: cfg.host, placeholder: 'peerjs.com' });
+            body.appendChild(hostInput);
+
+            // 端口
+            body.appendChild(createElement('label', { className: 'rtc-settings-label', textContent: '端口' }));
+            const portInput = createElement('input', { className: 'rtc-settings-input', value: String(cfg.port), placeholder: '443', type: 'number' });
+            body.appendChild(portInput);
+
+            // 密钥
+            body.appendChild(createElement('label', { className: 'rtc-settings-label', textContent: '密钥' }));
+            const keyInput = createElement('input', { className: 'rtc-settings-input', value: cfg.key || '', placeholder: '（可选）' });
+            body.appendChild(keyInput);
+
+            // 路径
+            body.appendChild(createElement('label', { className: 'rtc-settings-label', textContent: '路径' }));
+            const pathInput = createElement('input', { className: 'rtc-settings-input', value: cfg.path || '/', placeholder: '/' });
+            body.appendChild(pathInput);
+
+            // 安全连接 checkbox
+            const cbRow = createElement('label', { className: 'rtc-settings-checkbox-row' });
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = cfg.secure !== false;
+            cbRow.appendChild(cb);
+            cbRow.appendChild(createElement('span', { className: 'rtc-settings-checkbox-label', textContent: '安全连接（HTTPS/WSS）' }));
+            body.appendChild(cbRow);
+
+            dialog.appendChild(body);
+
+            // Footer
+            const footer = createElement('div', { className: 'rtc-settings-footer' });
+            const cancelBtn = createElement('button', { className: 'rtc-settings-btn-cancel', textContent: '取消' });
+            cancelBtn.onclick = () => closeSettings();
+            footer.appendChild(cancelBtn);
+            const saveBtn = createElement('button', { className: 'rtc-settings-btn-save', textContent: '保存设置' });
+            saveBtn.onclick = () => {
+                const portVal = parseInt(portInput.value, 10);
+                saveServerConfig({
+                    host: hostInput.value.trim() || 'peerjs.com',
+                    port: (portVal > 0 && portVal <= 65535) ? portVal : 443,
+                    key: keyInput.value.trim(),
+                    path: pathInput.value.trim() || '/',
+                    secure: cb.checked
+                });
+                closeSettings();
+                alert('设置已保存。下次创建/加入房间时生效。\n\n当前已连接的房间不受影响。');
+            };
+            footer.appendChild(saveBtn);
+            dialog.appendChild(footer);
+
+            settingsOverlay.appendChild(dialog);
+
+            // 点击遮罩关闭
+            settingsOverlay.addEventListener('click', (e) => {
+                if (e.target === settingsOverlay) closeSettings();
+            });
+
+            document.body.appendChild(settingsOverlay);
+        }
+
+        function closeSettings() {
+            if (settingsOverlay && settingsOverlay.parentNode) {
+                settingsOverlay.parentNode.removeChild(settingsOverlay);
+            }
+            settingsOverlay = null;
+        }
+
         function renderLanding(body) {
             // 标题栏
             const secTitle = createElement('div', { className: 'rtc-section-title' });
             secTitle.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5f6368" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>实时协作' +
-                '<span class="rtc-settings-badge"><button title="设置">⚙</button></span>';
+                '<span class="rtc-settings-badge"><button title="连接设置">⚙</button></span>';
             body.appendChild(secTitle);
+            // 绑定设置按钮
+            secTitle.querySelector('.rtc-settings-badge button').onclick = (e) => { e.stopPropagation(); showSettings(); };
 
             // 用户名
             const unameRow = createElement('div', { className: 'rtc-username-row' });
@@ -655,18 +842,35 @@ export default {
                     console.log('[RTC] PeerJS 库加载完成');
                 }
 
+                // 构建服务器列表：用户配置优先，然后是内置备选
+                const cfg = serverConfig;
+                const servers = [];
+                if (cfg.host && cfg.host !== 'peerjs.com') {
+                    servers.push({ host: cfg.host, port: cfg.port || 443, path: cfg.path || '/', key: cfg.key || undefined, secure: cfg.secure !== false });
+                }
+                // 用户配置作为第一优先级（即使也是 peerjs.com）
+                servers.push({ host: cfg.host || 'peerjs.com', port: cfg.port || 443, path: cfg.path || '/', key: cfg.key || undefined, secure: cfg.secure !== false });
+                // 内置备选
+                PEERJS_SERVERS.forEach(s => {
+                    if (s.host !== cfg.host) servers.push(s);
+                });
+
                 // 按优先级尝试各个信令服务器
-                for (let i = 0; i < PEERJS_SERVERS.length; i++) {
-                    const srv = PEERJS_SERVERS[i];
+                for (let i = 0; i < servers.length; i++) {
+                    const srv = servers[i];
                     try {
-                        console.log('[RTC] 尝试连接信令服务器:', srv.host + ':' + srv.port);
-                        peer = new window.Peer({
-                            debug: 1,  // 开启调试日志
+                        const peerOpts = {
+                            debug: 1,
                             host: srv.host,
                             port: srv.port,
                             path: srv.path,
                             config: { iceServers: ICE_SERVERS }
-                        });
+                        };
+                        if (srv.key) peerOpts.key = srv.key;
+                        if (srv.secure === false) peerOpts.secure = false;
+
+                        console.log('[RTC] 尝试连接信令服务器:', srv.host + ':' + srv.port + ' (secure=' + (srv.secure !== false) + ')');
+                        peer = new window.Peer(peerOpts);
 
                         // 用 Promise 包装连接，设置超时
                         const connected = await Promise.race([
@@ -1130,6 +1334,7 @@ export default {
 
         // 清理函数
         return function cleanup() {
+            closeSettings();
             leaveRoom();
             stopCursorMonitor();
             clearAllRemoteCursors();
