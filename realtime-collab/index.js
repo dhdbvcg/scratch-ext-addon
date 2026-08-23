@@ -474,18 +474,8 @@ export default {
             // 用户名
             const unameRow = createElement('div', { className: 'rtc-username-row' });
             unameRow.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' +
-                '<span>你的用户名是: <strong>' + escapeHtml(username) + '</strong></span>' +
-                '<button class="rtc-username-edit">✎</button>';
+                '<span>你的用户名是: <strong>' + escapeHtml(username) + '</strong></span>';
             body.appendChild(unameRow);
-            unameRow.querySelector('.rtc-username-edit').onclick = () => {
-                const newName = prompt('输入用户名:', username);
-                if (newName && newName.trim()) {
-                    username = newName.trim().slice(0, 20);
-                    localStorage.setItem(STORAGE_PREFIX + 'username', username);
-                    render();
-                    broadcastUserInfo();
-                }
-            };
 
             // 加入房间
             body.appendChild(createElement('div', { className: 'rtc-field-label', textContent: '加入现有房间' }));
