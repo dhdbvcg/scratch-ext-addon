@@ -205,6 +205,21 @@ export default {
   width: 8px; height: 8px; border-radius: 50%;
   background: #34a853; flex-shrink: 0;
 }
+:global(.rtc-status-dot.warn) { background: #f4b400; }
+:global(.rtc-status-dot.err) { background: #ea4335; }
+
+/* 连接异常状态条 */
+:global(.rtc-banner) {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 8px; margin-bottom: 12px;
+  font-size: 13px; line-height: 1.4;
+}
+:global(.rtc-banner.warn) { background: #fef7e0; border: 1px solid #fdd663; color: #b06000; }
+:global(.rtc-banner.err) { background: #fce8e6; border: 1px solid #f4c7c3; color: #c5221f; }
+:global(.rtc-banner svg) { flex-shrink: 0; }
+:global(.rtc-banner .rtc-banner-spin) { width: 14px; height: 14px; border: 2px solid #f4b400; border-top-color: #b06000; border-radius: 50%; animation: rtc-spin .8s linear infinite; flex-shrink: 0; }
+:global(.rtc-banner.editing) { background: #e6f4ea; border: 1px solid #b7dfc3; color: #137333; }
+:global(.rtc-banner.editing svg) { color: #34a853; }
 
 /* 用户列表 */
 :global(.rtc-users-title) { font-size: 13px; font-weight: 600; color: #202124; margin: 14px 0 8px; }
@@ -394,9 +409,15 @@ export default {
         let currentServerHost = '';   // 当前实际连接的信令服务器
         let wsSyncStarted = false;    // 工作区同步是否已启动（避免重复绑定）
         let connecting = false;       // 正在创建/加入房间
+        let connState = 'ok';         // 'ok' | 'disconnected' | 'reconnecting' | 'error'
+        let connStateMsg = '';        // 状态条文案
+        let editingBannerName = '';   // 远程编辑提示中的用户名
+        let editingBannerTimer = null;
         let chatMessages = [];
         let pendingXml = null;      // 收到但暂缓应用的 XML（避免循环广播）
         let suppressBroadcast = false;
+        let approvedMembers = {};   // peerId -> true（私人房间已审批）
+        let pendingJoiners = {};    // peerId -> { conn }（等待审批的加入者）
 
         // ─── 连接设置 ───
         const SETTINGS_KEY = STORAGE_PREFIX + 'server_config';
@@ -748,9 +769,27 @@ export default {
 
         function renderConnected(body) {
             connecting = false; // 已进入连接视图，清除加载态
+            // 连接异常状态条
+            if (connState !== 'ok') {
+                const bannerCls = connState === 'reconnecting' ? 'warn' : (connState === 'disconnected' ? 'warn' : 'err');
+                const banner = createElement('div', { className: 'rtc-banner ' + bannerCls });
+                if (connState === 'reconnecting') {
+                    banner.innerHTML = '<div class="rtc-banner-spin"></div><span>' + escapeHtml(connStateMsg || '连接中断，正在重连...') + '</span>';
+                } else {
+                    banner.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' +
+                        '<span>' + escapeHtml(connStateMsg || '连接异常') + '</span>';
+                }
+                body.appendChild(banner);
+            } else if (editingBannerName) {
+                // 远程编辑提示条
+                const eb = createElement('div', { className: 'rtc-banner editing' });
+                eb.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>' +
+                    '<span><strong>' + escapeHtml(editingBannerName) + '</strong> 正在编辑工作区…</span>';
+                body.appendChild(eb);
+            }
             // 房间信息
             const roomInfo = createElement('div', { className: 'rtc-section-title' });
-            roomInfo.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5f6368" stroke-width="2"><path d="M21 15a2 2 0 01-2  erc4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>' +
+            roomInfo.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5f6368" stroke-width="2"><path d="M21 15a2 2 0 01-2 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>' +
                 '<span class="rtc-room-name">房间:' + escapeHtml(roomId) + (roomAlias ? '（' + escapeHtml(roomAlias) + '）' : '') + '</span>';
             body.appendChild(roomInfo);
 
@@ -824,6 +863,27 @@ export default {
             };
             chatSendBtn.onclick = doSend;
             chatInput.onkeydown = (e) => { if (e.key === 'Enter') doSend(); };
+
+            // 房主：待审批列表（私人房间）
+            if (isHost && Object.keys(pendingJoiners).length > 0) {
+                body.appendChild(createElement('hr', { className: 'rtc-divider' }));
+                body.appendChild(createElement('div', { className: 'rtc-privacy-title', textContent: '待审批加入请求' }));
+                Object.keys(pendingJoiners).forEach(pid => {
+                    const meta = (connections[pid] && connections[pid].metadata) || {};
+                    const name = meta.username || '匿名用户';
+                    const item = createElement('div', { className: 'rtc-privacy-option' });
+                    item.innerHTML = '<div class="rtc-privacy-opt-name">👤 ' + escapeHtml(name) + '</div><div class="rtc-privacy-opt-desc">请求加入房间</div>';
+                    const btnRow = createElement('div', { style: 'display:flex;gap:8px;margin-top:8px;' });
+                    const okBtn = createElement('button', { className: 'rtc-btn rtc-btn-primary', textContent: '✓ 同意', style: 'margin-top:0;' });
+                    const noBtn = createElement('button', { className: 'rtc-btn rtc-btn-danger', textContent: '✕ 拒绝', style: 'margin-top:0;' });
+                    okBtn.onclick = () => approveJoiner(pid);
+                    noBtn.onclick = () => rejectJoiner(pid);
+                    btnRow.appendChild(okBtn);
+                    btnRow.appendChild(noBtn);
+                    item.appendChild(btnRow);
+                    body.appendChild(item);
+                });
+            }
 
             // 房主：隐私设置
             if (isHost) {
@@ -965,12 +1025,23 @@ export default {
             });
             peer.on('disconnected', () => {
                 console.warn('[RTC] 与信令服务器断开连接，尝试重连...');
+                connState = 'reconnecting';
+                connStateMsg = '连接中断，正在重连信令服务器...';
+                render();
                 // 尝试重连
                 setTimeout(() => {
                     if (peer && !peer.destroyed) {
                         peer.reconnect();
                     }
                 }, 3000);
+            });
+            peer.on('open', () => {
+                // 重连成功后恢复状态
+                if (connState !== 'ok') {
+                    connState = 'ok';
+                    connStateMsg = '';
+                    render();
+                }
             });
             peer.on('close', () => {
                 console.log('[RTC] Peer 连接已关闭');
@@ -999,6 +1070,7 @@ export default {
             isHost = true;
             privacy = 'public';
             chatMessages = [];
+            loadChatHistory();
 
             console.log('[RTC] 房间已创建! RoomId:', roomId, 'Alias:', roomAlias, 'MyPeerId:', myPeerId);
 
@@ -1019,6 +1091,7 @@ export default {
             roomId = id;
             isHost = false;
             chatMessages = [];
+            loadChatHistory();
 
             console.log('[RTC] 正在加入房间:', id, '我的PeerId:', myPeerId);
 
@@ -1083,30 +1156,38 @@ export default {
 
             conn.on('open', () => {
                 console.log('[RTC] ✓ 连接已建立! 对方:', conn.peer);
-                connections[conn.peer] = { conn, metadata: {} };
 
-                // 发送自己的用户信息
+                // 发送自己的用户信息（房主据此判断是否需要审批）
                 conn.send(JSON.stringify({
                     type: 'user-info',
                     username: username,
                     isHost: isHost
                 }));
 
-                // 如果我是房主，把当前工作区XML发给新成员
                 if (isHost) {
-                    try {
-                        const xml = getWorkspaceXml();
-                        conn.send(JSON.stringify({ type: 'workspace-xml', xml: xml, from: myPeerId }));
-                    } catch(e) {}
+                    // 房主侧：记录连接，等待加入者发 join-request
+                    connections[conn.peer] = { conn, metadata: {} };
+                    if (privacy === 'private' && !approvedMembers[conn.peer]) {
+                        // 私人房间：暂不放行，要求加入者发起审批请求
+                        pendingJoiners[conn.peer] = { conn };
+                        conn.send(JSON.stringify({ type: 'join-need-approval', host: username }));
+                        render(); // 刷新审批列表
+                    } else {
+                        // 公开房间：直接同步
+                        approvedMembers[conn.peer] = true;
+                        sendWorkspaceToPeer(conn);
+                    }
+                } else {
+                    // 加入者侧：请求加入（房主决定是否需要审批）
+                    conn.send(JSON.stringify({ type: 'join-request', username: username }));
                 }
 
-                // 请求房主发最新XML（非房主）
-                if (!isHost) {
-                    conn.send(JSON.stringify({ type: 'request-xml' }));
+                // 连接成功后启动工作区同步（仅一次；加入者仅在被批准后启用）
+                if (isHost) {
+                    ensureWorkspaceSync();
+                } else {
+                    // 加入者：收到 join-approve 后才启用同步
                 }
-
-                // 连接成功后启动工作区同步（仅一次）
-                ensureWorkspaceSync();
 
                 render();
             });
@@ -1124,6 +1205,8 @@ export default {
                 console.log('[RTC] Connection closed:', conn.peer);
                 removeRemoteCursor(conn.peer);
                 delete connections[conn.peer];
+                delete pendingJoiners[conn.peer];
+                delete approvedMembers[conn.peer];
                 render();
             });
 
@@ -1143,6 +1226,52 @@ export default {
                     render();
                     break;
 
+                case 'join-request':
+                    console.log('[RTC] 收到加入请求:', msg.username, fromPeerId);
+                    if (isHost) {
+                        // 标记待审批
+                        if (connections[fromPeerId]) connections[fromPeerId].metadata = connections[fromPeerId].metadata || {};
+                        pendingJoiners[fromPeerId] = { conn: (connections[fromPeerId] && connections[fromPeerId].conn) || null };
+                        render(); // 刷新审批列表
+                    }
+                    break;
+
+                case 'join-need-approval':
+                    // 加入者收到：等待房主审批
+                    console.log('[RTC] 房主要求审批，等待批准...');
+                    if (!isHost) {
+                        connState = 'reconnecting';
+                        connStateMsg = '已连接到房主，等待审批...';
+                        render();
+                    }
+                    break;
+
+                case 'join-approve':
+                    // 加入者收到：正式加入，请求工作区
+                    console.log('[RTC] 加入已批准');
+                    if (!isHost) {
+                        connState = 'ok';
+                        connStateMsg = '';
+                        approvedMembers[fromPeerId] = true;
+                        const c = connections[fromPeerId];
+                        if (c && c.conn) {
+                            c.conn.send(JSON.stringify({ type: 'request-xml' }));
+                        }
+                        ensureWorkspaceSync();
+                    }
+                    break;
+
+                case 'join-reject':
+                    // 加入者收到：被拒绝
+                    if (!isHost) {
+                        connState = 'err';
+                        connStateMsg = '房主拒绝了您的加入请求';
+                        setTimeout(() => {
+                            leaveRoom();
+                        }, 1500);
+                    }
+                    break;
+
                 case 'chat':
                     addChatMessage(msg.name || '未知', msg.text || '');
                     // 房主作为中继：把聊天转发给其他人
@@ -1155,6 +1284,9 @@ export default {
                         suppressBroadcast = true;
                         try { setWorkspaceXml(msg.xml); } catch(e) {}
                         setTimeout(() => { suppressBroadcast = false; }, 500);
+                        // 远程编辑提示：显示「X 正在编辑」
+                        const editorName = (connections[fromPeerId] && connections[fromPeerId].metadata && connections[fromPeerId].metadata.username) || '协作者';
+                        showEditingBanner(editorName);
                     }
                     // 房主作为中继：把工作区变更转发给其他成员（排除发送者）
                     // 避免回声风暴：仅当此消息不是「已被中继过」的才转发
@@ -1163,18 +1295,25 @@ export default {
 
                 case 'request-xml':
                     if (isHost) {
-                        try {
-                            const xml = getWorkspaceXml();
-                            const targetConn = connections[fromPeerId];
-                            if (targetConn && targetConn.conn) {
-                                targetConn.conn.send(JSON.stringify({ type: 'workspace-xml', xml: xml, from: myPeerId }));
-                            }
-                        } catch(e) {}
+                        const targetConn = connections[fromPeerId];
+                        if (targetConn && targetConn.conn) {
+                            sendWorkspaceToPeer(targetConn.conn);
+                        }
                     }
                     break;
 
                 case 'privacy':
                     privacy = msg.value || 'public';
+                    if (privacy === 'public') {
+                        // 切换为公开：放行所有已连接但未审批的成员
+                        Object.keys(connections).forEach(pid => {
+                            if (!approvedMembers[pid]) {
+                                approvedMembers[pid] = true;
+                                delete pendingJoiners[pid];
+                                sendWorkspaceToPeer(connections[pid].conn);
+                            }
+                        });
+                    }
                     // 房主作为中继：转发隐私设置
                     if (isHost) relay(msg, fromPeerId);
                     render();
@@ -1194,13 +1333,24 @@ export default {
             }
         }
 
-        // 房主作为中继：把消息转发给除发送者外的所有其他成员
+        // 房主把当前工作区 XML 发给指定连接（用于审批通过 / 公开放行）
+        function sendWorkspaceToPeer(targetConn) {
+            if (!targetConn) return;
+            try {
+                const xml = getWorkspaceXml();
+                targetConn.send(JSON.stringify({ type: 'workspace-xml', xml: xml, from: myPeerId }));
+            } catch(e) {}
+        }
+
+        // 房主作为中继：把消息转发给除发送者外的所有其他成员（私人房间下跳过未审批者）
         function relay(msgObj, excludePeerId) {
             // 标记为「已被中继」，接收方（房主）不再二次转发，避免回声风暴
             const relayMsg = Object.assign({}, msgObj, { relayed: true });
             const data = JSON.stringify(relayMsg);
             Object.keys(connections).forEach(peerId => {
                 if (peerId === excludePeerId) return;
+                // 私人房间：未审批成员不参与同步链路（看不到他人活动）
+                if (privacy === 'private' && !approvedMembers[peerId]) return;
                 const c = connections[peerId];
                 if (c && c.conn) {
                     try { c.conn.send(data); } catch(e) {}
@@ -1213,6 +1363,26 @@ export default {
             Object.values(connections).forEach(c => {
                 try { c.conn.send(data); } catch(e) {}
             });
+        }
+
+        // 房主批准/拒绝加入者
+        function approveJoiner(peerId) {
+            approvedMembers[peerId] = true;
+            delete pendingJoiners[peerId];
+            const c = connections[peerId];
+            if (c && c.conn) {
+                c.conn.send(JSON.stringify({ type: 'join-approve', from: myPeerId }));
+                sendWorkspaceToPeer(c.conn);
+            }
+            render();
+        }
+        function rejectJoiner(peerId) {
+            const c = connections[peerId];
+            if (c && c.conn) {
+                try { c.conn.send(JSON.stringify({ type: 'join-reject', from: myPeerId })); } catch(e) {}
+            }
+            delete pendingJoiners[peerId];
+            render();
         }
 
         function broadcastUserInfo() {
@@ -1299,6 +1469,38 @@ export default {
         function addChatMessage(name, text) {
             chatMessages.push({ name, text, time: Date.now() });
             if (chatMessages.length > 200) chatMessages.shift(); // 限制历史
+            saveChatHistory();
+        }
+        function saveChatHistory() {
+            if (!roomId) return;
+            try {
+                sessionStorage.setItem(STORAGE_PREFIX + 'chat_' + roomId, JSON.stringify(chatMessages));
+            } catch(e) {}
+        }
+        function loadChatHistory() {
+            if (!roomId) return;
+            try {
+                const raw = sessionStorage.getItem(STORAGE_PREFIX + 'chat_' + roomId);
+                if (raw) {
+                    const arr = JSON.parse(raw);
+                    if (Array.isArray(arr)) chatMessages = arr;
+                }
+            } catch(e) {}
+        }
+        function clearChatHistory() {
+            try { sessionStorage.removeItem(STORAGE_PREFIX + 'chat_' + roomId); } catch(e) {}
+        }
+
+        // 远程编辑提示条（短暂显示「X 正在编辑」）
+        function showEditingBanner(name) {
+            editingBannerName = name;
+            if (editingBannerTimer) clearTimeout(editingBannerTimer);
+            editingBannerTimer = setTimeout(() => {
+                editingBannerName = '';
+                editingBannerTimer = null;
+                render();
+            }, 2500);
+            render();
         }
 
         // ─── 远程光标 ───
@@ -1407,6 +1609,11 @@ export default {
             isHost = false;
             roomId = '';
             chatMessages = [];
+            connState = 'ok';
+            connStateMsg = '';
+            approvedMembers = {};
+            pendingJoiners = {};
+            clearChatHistory();
             render();
         }
 
