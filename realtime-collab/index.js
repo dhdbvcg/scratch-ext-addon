@@ -19,9 +19,8 @@ export default {
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow: hidden;
-  resize: both;
-  min-width: 340px;
-  min-height: 400px;
+  min-width: 300px;
+  min-height: 360px;
 }
 :global(.rtc-header) {
   display: flex;
@@ -56,6 +55,27 @@ export default {
 }
 :global(.rtc-header-btn:hover) { background: #e8eaed; }
 :global(.rtc-body) { padding: 12px 16px; overflow-y: auto; flex: 1; }
+
+/* 自由拉伸手柄（8 方向） */
+:global(.rtc-resize-layer) {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99998;
+}
+:global(.rtc-resize-handle) {
+  position: absolute;
+  pointer-events: auto;
+  z-index: 99999;
+}
+:global(.rtc-resize-handle:hover) { background: rgba(26,115,232,.25); }
+:global(.rtc-rz-n)  { top: -4px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+:global(.rtc-rz-s)  { bottom: -4px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+:global(.rtc-rz-e)  { right: -4px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+:global(.rtc-rz-w)  { left: -4px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+:global(.rtc-rz-ne) { top: -4px; right: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+:global(.rtc-rz-nw) { top: -4px; left: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+:global(.rtc-rz-se) { bottom: -4px; right: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+:global(.rtc-rz-sw) { bottom: -4px; left: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
 :global(.rtc-alpha-banner) {
   background: #fef7e0;
   border: 1px solid #fdd663;
@@ -265,8 +285,81 @@ export default {
             panel.style.top = newTop + 'px';
             panel.style.right = 'auto';
             panel.style.transform = 'none';
+            syncResizeLayer();
         }
         function endDrag() { dragState = null; }
+
+        // 自由拉伸功能（8 方向）
+        let resizeState = null;
+        const RESIZE_DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
+        const resizeLayer = createElement('div', { className: 'rtc-resize-layer' });
+        RESIZE_DIRS.forEach(dir => {
+            const h = createElement('div', { className: 'rtc-resize-handle rtc-rz-' + dir });
+            h.dataset.dir = dir;
+            h.addEventListener('mousedown', (e) => startResize(e, dir));
+            resizeLayer.appendChild(h);
+        });
+        document.body.appendChild(resizeLayer);
+
+        function syncResizeLayer() {
+            if (panel.style.display === 'none' || isMaximized) { resizeLayer.style.display = 'none'; return; }
+            resizeLayer.style.display = '';
+            const r = panel.getBoundingClientRect();
+            resizeLayer.style.left = r.left + 'px';
+            resizeLayer.style.top = r.top + 'px';
+            resizeLayer.style.width = r.width + 'px';
+            resizeLayer.style.height = r.height + 'px';
+        }
+
+        function startResize(e, dir) {
+            if (isMaximized) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const r = panel.getBoundingClientRect();
+            resizeState = {
+                dir,
+                startX: e.clientX,
+                startY: e.clientY,
+                origLeft: r.left,
+                origTop: r.top,
+                origW: r.width,
+                origH: r.height
+            };
+        }
+
+        function onResize(e) {
+            if (!resizeState) return;
+            const d = resizeState;
+            const dx = e.clientX - d.startX;
+            const dy = e.clientY - d.startY;
+            let newLeft = d.origLeft;
+            let newTop = d.origTop;
+            let newW = d.origW;
+            let newH = d.origH;
+            const minW = 300, minH = 360;
+            if (d.dir.indexOf('e') !== -1) newW = Math.max(minW, d.origW + dx);
+            if (d.dir.indexOf('s') !== -1) newH = Math.max(minH, d.origH + dy);
+            if (d.dir.indexOf('w') !== -1) {
+                newW = Math.max(minW, d.origW - dx);
+                newLeft = d.origLeft + (d.origW - newW);
+            }
+            if (d.dir.indexOf('n') !== -1) {
+                newH = Math.max(minH, d.origH - dy);
+                newTop = d.origTop + (d.origH - newH);
+            }
+            // 边界约束
+            newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - 40));
+            newTop = Math.max(0, Math.min(newTop, window.innerHeight - 40));
+            panel.style.left = newLeft + 'px';
+            panel.style.top = newTop + 'px';
+            panel.style.right = 'auto';
+            panel.style.width = newW + 'px';
+            panel.style.height = newH + 'px';
+            panel.style.transform = 'none';
+            syncResizeLayer();
+        }
+
+        function endResize() { resizeState = null; }
 
         function toggleMaximize() {
             if (!isMaximized) {
@@ -294,6 +387,7 @@ export default {
                 isMaximized = false;
             }
             render();
+            syncResizeLayer();
         }
 
         function render() {
@@ -796,14 +890,18 @@ export default {
         panel.style.display = 'none';
         document.body.appendChild(panel);
 
-        // 全局拖拽事件
+        // 全局拖拽 / 拉伸事件
         document.addEventListener('mousemove', onDrag);
+        document.addEventListener('mousemove', onResize);
         document.addEventListener('mouseup', endDrag);
+        document.addEventListener('mouseup', endResize);
+        window.addEventListener('resize', syncResizeLayer);
 
         // 添加工具栏触发按钮
         const triggerBtn = addToolbarButton('🤝 实时协作', () => {
             panel.style.display = panel.style.display === 'none' ? '' : 'none';
             render();
+            syncResizeLayer();
         });
 
         // 检查 URL 是否带房间ID
@@ -824,8 +922,12 @@ export default {
         return function cleanup() {
             leaveRoom();
             document.removeEventListener('mousemove', onDrag);
+            document.removeEventListener('mousemove', onResize);
             document.removeEventListener('mouseup', endDrag);
+            document.removeEventListener('mouseup', endResize);
+            window.removeEventListener('resize', syncResizeLayer);
             if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
+            if (resizeLayer && resizeLayer.parentNode) resizeLayer.parentNode.removeChild(resizeLayer);
             if (triggerBtn && triggerBtn.parentNode) triggerBtn.parentNode.removeChild(triggerBtn);
         };
     }
