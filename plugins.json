@@ -41,6 +41,12 @@
       "name": "实时协作",
       "description": "多人实时协作编辑扩展制作器。支持创建/加入房间、在线用户列表、聊天、Blockly 工作区实时同步、房间隐私设置。基于 WebRTC（PeerJS）点对点连接。",
       "category": "协作"
+    },
+    {
+      "dir": "workbuddy-bridge",
+      "name": "WorkBuddy 模型桥",
+      "description": "把 WorkBuddy 桌面端的登录态桥给编辑器 AI 助手：多账号轮询、SSE 流式、15 个模型（DeepSeek / GLM / Kimi / MiniMax），积分与桌面端共用。设置面板里一键配置。",
+      "category": "AI"
     }
   ]
 }
